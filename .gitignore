@@ -1,0 +1,95 @@
+# ==============================================================================
+# Byte-compiled / optimized / cache files
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ==============================================================================
+# Virtual Environments
+# ==============================================================================
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ==============================================================================
+# Datasets & Raw Audio Files (Large media & extracted features)
+# ==============================================================================
+# Raw audio directories and archive files
+fma-small/
+fma-small.zip
+fma_metadata/
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.rar
+
+# Audio recordings / stems
+*.mp3
+*.wav
+*.flac
+*.ogg
+*.m4a
+*.aac
+
+# Extracted tabular dataset files
+features_small.csv
+filtered_features.csv
+*.csv
+
+# ==============================================================================
+# Trained Model Weights & Serialized Artifacts (Large Binaries)
+# ==============================================================================
+*.joblib
+*.pkl
+*.pickle
+*.h5
+*.keras
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.bin
+
+# Model output weight artifacts (keep directories or plots/reports if needed)
+best_model.joblib
+scaler.joblib
+label_encoder.joblib
+train_model/**/best_model.joblib
+train_model/**/scaler.joblib
+train_model/**/label_encoder.joblib
+
+# ==============================================================================
+# Credentials, Secrets & Sensitive Information
+# ==============================================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.pfx
+*.p12
+*token*
+*credential*.json
+*secret*.json
+id_rsa
+id_ed25519
+
+# ==============================================================================
+# IDEs & Operating System Artifacts
+# ==============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
