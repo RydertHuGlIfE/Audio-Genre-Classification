@@ -10,6 +10,16 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 from sklearn.svm import SVC
 
+
+baseline_svm = SVC(
+    kernel="rbf",                       
+    C=1.0,                 #regularization baseline basically smth smth penalty
+    gamma="scale",          #low gamma - wider influence smoooth boundayr 
+    probability=True,       # enables probablity estimates
+    random_state=42         #sets seed for reproducibility of the rbf kernel
+
+)
+
 def save_plots_and_metrics(latest_dir, best_model, scaler, label_encoder, best_name, best_acc, best_pred, y_test, accuracies):
     # 1. Save model weights
     joblib.dump(best_model, os.path.join(latest_dir, "best_model.joblib"))
@@ -149,9 +159,25 @@ def train():
 
     # Support Vector Machine (SVM) configurations
     models = {
-        # Add your SVM model(s) here
+        "SVM (RBF Baseline, C=1.0)":baseline_svm, 
+
+        #adding comparsoin model with high c 
+
+        "SVM (RBF, C=10)":  SVC(
+            kernel="rbf", C=10.0, gamma="scale", probability=True, random_state=42
+        ),
+        
     }
 
+    for name, model in models.items():
+        print(f"Training: {name}")
+
+        model.fit(X_train_scaled, y_train)                  #actual training method
+        preds = model.predicts(X_test_scaled)                 #eval on test split
+
+        acc = accuracy_score(y_test, preds)
+        print(f"{name} with Accuracy: {acc * 100:.2f}%")
+    
     best_model = None
     best_acc = 0.0
     best_name = ""
