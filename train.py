@@ -11,7 +11,6 @@ from sklearn.metrics import classification_report, accuracy_score, confusion_mat
 from sklearn.svm import SVC
 
 
-# Baseline Model Definition (Editable)
 baseline_svm = SVC(
     kernel="rbf",                       
     C=1.0,                 #regularization baseline basically smth smth penalty
@@ -21,18 +20,9 @@ baseline_svm = SVC(
 )
 
 
-# ==============================================================================
-# 1. Main Training Pipeline
-# ==============================================================================
+#train pipeline
+
 def train():
-    """
-    Main training workflow:
-    1. Loads pre-computed acoustic features.
-    2. Encodes genre labels and performs stratified train/test split.
-    3. Normalizes features with StandardScaler.
-    4. Trains and evaluates candidate SVM models.
-    5. Dispatches evaluation data to visualization and weight-saving routines.
-    """
     feature_file = "features_small.csv"
     if not os.path.exists(feature_file):
         print(f"Error: Could not find '{feature_file}'.")
@@ -57,7 +47,7 @@ def train():
     y_encoded = label_encoder.fit_transform(y)
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y_encoded, test_size=0.5, random_state=49, stratify=y_encoded
+        X, y_encoded, test_size=0.3, random_state=49, stratify=y_encoded
     )
 
     scaler = StandardScaler()
