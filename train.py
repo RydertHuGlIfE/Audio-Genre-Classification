@@ -7,10 +7,8 @@ import joblib
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier, ExtraTreesClassifier
-from sklearn.neural_network import MLPClassifier
-from xgboost import XGBClassifier
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+from sklearn.svm import SVC
 
 def save_plots_and_metrics(latest_dir, best_model, scaler, label_encoder, best_name, best_acc, best_pred, y_test, accuracies):
     # 1. Save model weights
@@ -114,19 +112,13 @@ def save_plots_and_metrics(latest_dir, best_model, scaler, label_encoder, best_n
         json.dump(metrics_data, f, indent=4)
 
 def train():
-    feature_file = "filtered_features.csv"  # Load filtered
-    if os.path.exists(feature_file):
-        print(f"Loading custom filtered features from '{feature_file}'...")
-    else:
-        print(f"'{feature_file}' not found. Falling back to default features_small.csv...")
-        feature_file = "features_small.csv"
-        
+    feature_file = "features_small.csv"
     if not os.path.exists(feature_file):
         print(f"Error: Could not find '{feature_file}'.")
-        print("Please extract features from audio files first using 'datapreprocess.py' or 'filter_preprocess.py'.")
+        print("Please extract features from audio files first using 'datapreprocess.py'.")
         return
 
-    print("Loading extracted features...")
+    print(f"Loading extracted features from '{feature_file}'...")
     df = pd.read_csv(feature_file)
     
     target_col = 'genre' if 'genre' in df.columns else df.columns[-1]
@@ -155,46 +147,9 @@ def train():
     X_train_scaled = pd.DataFrame(X_train_scaled, columns=X.columns)
     X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
 
-    # Models set to 1000 Epochs / Trees
+    # Support Vector Machine (SVM) configurations
     models = {
-        "Multi-Layer Perceptron (1000 Epochs)": MLPClassifier(
-            hidden_layer_sizes=(128, 64),
-            max_iter=1000,
-            activation='relu',
-            solver='adam',
-            alpha=0.05,
-            batch_size=128,  # Batch size
-            learning_rate_init=0.0005,
-            learning_rate='adaptive',
-            random_state=42,
-            verbose=True,
-            early_stopping=True,
-            n_iter_no_change=25
-        ),
-        "Hist Gradient Boosting (1000 Trees)": HistGradientBoostingClassifier(
-            max_iter=1000, 
-            learning_rate=0.03, 
-            random_state=42
-        ),
-        "XGBoost (1000 Estimators)": XGBClassifier(
-            n_estimators=1000, 
-            learning_rate=0.03, 
-            max_depth=6, 
-            random_state=42, 
-            eval_metric='mlogloss', 
-            n_jobs=-1
-        ),
-        "Random Forest (1000 Trees)": RandomForestClassifier(
-            n_estimators=1000, 
-            max_depth=20, 
-            random_state=42, 
-            n_jobs=-1
-        ),
-        "Extra Trees (1000 Trees)": ExtraTreesClassifier(
-            n_estimators=1000, 
-            random_state=42, 
-            n_jobs=-1
-        )
+        # Add your SVM model(s) here
     }
 
     best_model = None
@@ -203,7 +158,7 @@ def train():
     best_pred = None
     accuracies = {}
 
-    print("\n--- Supervised Training (1000-Epoch Base) ---")
+    print("\n--- Supervised Model Training ---")
     for name, model in models.items():
         print(f"\nTraining {name}...")
         model.fit(X_train_scaled, y_train)
