@@ -1,4 +1,4 @@
 {
-    "accuracy": 0.6115,
-    "model_name": "Hist Gradient Boosting (1000 Trees)"
+    "accuracy": 0.6020833333333333,
+    "model_name": "SVM (RBF Baseline, C=1.0)"
 }

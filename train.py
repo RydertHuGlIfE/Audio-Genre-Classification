@@ -5,10 +5,11 @@ import pandas as pd
 import numpy as np
 import joblib
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 from sklearn.svm import SVC
+from sklearn.decomposition import PCA
 
 
 baseline_svm = SVC(
@@ -23,10 +24,13 @@ baseline_svm = SVC(
 #train pipeline
 
 def train():
-    feature_file = "features_small.csv"
-    if not os.path.exists(feature_file):
-        print(f"Error: Could not find '{feature_file}'.")
-        print("Please extract features from audio files first using 'datapreprocess.py'.")
+    # Prefer richer filtered features if available, else fall back to base features
+    if os.path.exists("filtered_features.csv"):
+        feature_file = "filtered_features.csv"
+    elif os.path.exists("features_small.csv"):
+        feature_file = "features_small.csv"
+    else:
+        print("Error: No feature file found. Run 'datapreprocess.py' or 'filter_preprocess.py' first.")
         return
 
     print(f"Loading extracted features from '{feature_file}'...")
@@ -54,20 +58,34 @@ def train():
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
 
-    # Convert back to DataFrame to preserve feature names and prevent warnings
-    X_train_scaled = pd.DataFrame(X_train_scaled, columns=X.columns)
-    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
+    # PCA Dimensionality Reduction (retains 95% of variance)
+    pca = PCA(n_components=0.95, random_state=42)
+    X_train_pca = pca.fit_transform(X_train_scaled)
+    X_test_pca = pca.transform(X_test_scaled)
+    print(f"PCA: {X_train_scaled.shape[1]} original features -> {X_train_pca.shape[1]} principal components (95% variance)")
 
-    # Support Vector Machine (SVM) configurations
+    # GridSearchCV: Hyperparameter search over C and gamma
+    print("\nRunning GridSearchCV to find best SVM hyperparameters...")
+    param_grid = {
+        "C": [0.1, 1, 10, 40, 100],
+        "gamma": ["scale", "auto", 0.001, 0.01, 0.1]
+    }
+    grid = GridSearchCV(
+        SVC(kernel="rbf", random_state=42),
+        param_grid,
+        cv=5,
+        scoring="accuracy",
+        n_jobs=-1,
+        verbose=1
+    )
+    grid.fit(X_train_pca, y_train)
+    print(f"Best Params: {grid.best_params_}")
+    print(f"Best CV Accuracy: {grid.best_score_ * 100:.2f}%")
+
+    # Support Vector Machine (SVM) configurations using best params from GridSearchCV
     models = {
         "SVM (RBF Baseline, C=1.0)": baseline_svm,
-        "SVM (RBF Tuned, C=10.0)": SVC(
-            kernel="rbf",
-            C=10.0,
-            gamma="scale",
-            probability=True,
-            random_state=42
-        )
+        "SVM (RBF GridSearch Best)": grid.best_estimator_
     }
 
     best_model = None
@@ -76,11 +94,15 @@ def train():
     best_pred = None
     accuracies = {}
 
-    print("\n--- Supervised Model Training ---")
+    print("\n--- Final Model Evaluation ---")
     for name, model in models.items():
-        print(f"\nTraining {name}...")
-        model.fit(X_train_scaled, y_train)
-        preds = model.predict(X_test_scaled)
+        print(f"\nEvaluating {name}...")
+        # Baseline uses original scaled features; GridSearch best uses PCA-reduced features
+        if name == "SVM (RBF Baseline, C=1.0)":
+            model.fit(X_train_scaled, y_train)
+            preds = model.predict(X_test_scaled)
+        else:
+            preds = model.predict(X_test_pca)
         acc = accuracy_score(y_test, preds)
         print(f"-> {name} Test Accuracy: {acc * 100:.2f}%")
         accuracies[name] = acc
