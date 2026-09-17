@@ -11,16 +11,149 @@ from sklearn.metrics import classification_report, accuracy_score, confusion_mat
 from sklearn.svm import SVC
 
 
+# Baseline Model Definition (Editable)
 baseline_svm = SVC(
     kernel="rbf",                       
     C=1.0,                 #regularization baseline basically smth smth penalty
     gamma="scale",          #low gamma - wider influence smoooth boundayr 
     probability=True,       # enables probablity estimates
     random_state=42         #sets seed for reproducibility of the rbf kernel
-
 )
 
+
+# ==============================================================================
+# 1. Main Training Pipeline
+# ==============================================================================
+def train():
+    """
+    Main training workflow:
+    1. Loads pre-computed acoustic features.
+    2. Encodes genre labels and performs stratified train/test split.
+    3. Normalizes features with StandardScaler.
+    4. Trains and evaluates candidate SVM models.
+    5. Dispatches evaluation data to visualization and weight-saving routines.
+    """
+    feature_file = "features_small.csv"
+    if not os.path.exists(feature_file):
+        print(f"Error: Could not find '{feature_file}'.")
+        print("Please extract features from audio files first using 'datapreprocess.py'.")
+        return
+
+    print(f"Loading extracted features from '{feature_file}'...")
+    df = pd.read_csv(feature_file)
+    
+    target_col = 'genre' if 'genre' in df.columns else df.columns[-1]
+
+    drop_cols = [target_col]
+    if 'track_id' in df.columns:
+        drop_cols.append('track_id')
+    if df.columns[0].startswith('Unnamed') or df.columns[0] == '0':
+        drop_cols.append(df.columns[0])
+
+    X = df.drop(columns=drop_cols)
+    y = df[target_col]
+
+    label_encoder = LabelEncoder()
+    y_encoded = label_encoder.fit_transform(y)
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y_encoded, test_size=0.5, random_state=49, stratify=y_encoded
+    )
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+
+    # Convert back to DataFrame to preserve feature names and prevent warnings
+    X_train_scaled = pd.DataFrame(X_train_scaled, columns=X.columns)
+    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
+
+    # Support Vector Machine (SVM) configurations
+    models = {
+        "SVM (RBF Baseline, C=1.0)": baseline_svm,
+        "SVM (RBF Tuned, C=10.0)": SVC(
+            kernel="rbf",
+            C=10.0,
+            gamma="scale",
+            probability=True,
+            random_state=42
+        )
+    }
+
+    best_model = None
+    best_acc = 0.0
+    best_name = ""
+    best_pred = None
+    accuracies = {}
+
+    print("\n--- Supervised Model Training ---")
+    for name, model in models.items():
+        print(f"\nTraining {name}...")
+        model.fit(X_train_scaled, y_train)
+        preds = model.predict(X_test_scaled)
+        acc = accuracy_score(y_test, preds)
+        print(f"-> {name} Test Accuracy: {acc * 100:.2f}%")
+        accuracies[name] = acc
+
+        if acc > best_acc:
+            best_acc = acc
+            best_model = model
+            best_name = name
+            best_pred = preds
+
+    print(f"\n==========================================")
+    print(f" BEST MODEL: {best_name} ({best_acc * 100:.2f}% Accuracy)")
+    print(f"==========================================\n")
+
+    # Define directories
+    train_model_dir = "train_model"
+    latest_dir = os.path.join(train_model_dir, "latest_weight")
+    best_dir = os.path.join(train_model_dir, "best_weight")
+
+    # Clear and recreate latest directory
+    if os.path.exists(latest_dir):
+        shutil.rmtree(latest_dir)
+    os.makedirs(latest_dir, exist_ok=True)
+    os.makedirs(best_dir, exist_ok=True)
+
+    print("Generating and saving graphs, metrics, and weight files in 'latest_weight'...")
+    save_plots_and_metrics(latest_dir, best_model, scaler, label_encoder, best_name, best_acc, best_pred, y_test, accuracies)
+    print("Artifacts saved successfully!")
+
+    # Check if latest weight is >= best weight
+    best_metrics_path = os.path.join(best_dir, "metrics.json")
+    update_best = False
+    if not os.path.exists(best_metrics_path):
+        update_best = True
+    else:
+        try:
+            with open(best_metrics_path, "r") as f:
+                best_metrics = json.load(f)
+            if best_acc >= best_metrics.get("accuracy", 0.0):
+                update_best = True
+        except Exception as e:
+            print(f"Warning: Could not read best metrics.json: {e}. Overwriting best weight.")
+            update_best = True
+
+    if update_best:
+        print(f"\n---> Current accuracy ({best_acc * 100:.2f}%) is >= best saved accuracy. Updating 'best_weight'...")
+        if os.path.exists(best_dir):
+            shutil.rmtree(best_dir)
+        shutil.copytree(latest_dir, best_dir)
+        print("Updated 'train_model/best_weight/' successfully with all graphs, metrics, and weights!")
+    else:
+        with open(best_metrics_path, "r") as f:
+            best_metrics = json.load(f)
+        print(f"\n---> Current accuracy ({best_acc * 100:.2f}%) did not exceed best saved accuracy ({best_metrics.get('accuracy', 0.0) * 100:.2f}%). 'best_weight' remains unchanged.")
+
+
+# ==============================================================================
+# 2. Plotting, Metrics & Presentation Layer
+# ==============================================================================
 def save_plots_and_metrics(latest_dir, best_model, scaler, label_encoder, best_name, best_acc, best_pred, y_test, accuracies):
+    """
+    Generates and saves visual evaluation artifacts, serialized weights, and metric reports.
+    """
     # 1. Save model weights
     joblib.dump(best_model, os.path.join(latest_dir, "best_model.joblib"))
     joblib.dump(scaler, os.path.join(latest_dir, "scaler.joblib"))
@@ -121,130 +254,9 @@ def save_plots_and_metrics(latest_dir, best_model, scaler, label_encoder, best_n
     with open(os.path.join(latest_dir, "metrics.json"), "w") as f:
         json.dump(metrics_data, f, indent=4)
 
-def train():
-    feature_file = "features_small.csv"
-    if not os.path.exists(feature_file):
-        print(f"Error: Could not find '{feature_file}'.")
-        print("Please extract features from audio files first using 'datapreprocess.py'.")
-        return
 
-    print(f"Loading extracted features from '{feature_file}'...")
-    df = pd.read_csv(feature_file)
-    
-    target_col = 'genre' if 'genre' in df.columns else df.columns[-1]
-
-    drop_cols = [target_col]
-    if 'track_id' in df.columns:
-        drop_cols.append('track_id')
-    if df.columns[0].startswith('Unnamed') or df.columns[0] == '0':
-        drop_cols.append(df.columns[0])
-
-    X = df.drop(columns=drop_cols)
-    y = df[target_col]
-
-    label_encoder = LabelEncoder()
-    y_encoded = label_encoder.fit_transform(y)
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y_encoded, test_size=0.5, random_state=49, stratify=y_encoded
-    )
-
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-
-    # Convert back to DataFrame to preserve feature names and prevent warnings
-    X_train_scaled = pd.DataFrame(X_train_scaled, columns=X.columns)
-    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
-
-    # Support Vector Machine (SVM) configurations
-    models = {
-        "SVM (RBF Baseline, C=1.0)":baseline_svm, 
-
-        #adding comparsoin model with high c 
-
-        "SVM (RBF, C=10)":  SVC(
-            kernel="rbf", C=10.0, gamma="scale", probability=True, random_state=42
-        ),
-        
-    }
-
-    for name, model in models.items():
-        print(f"Training: {name}")
-
-        model.fit(X_train_scaled, y_train)                  #actual training method
-        preds = model.predicts(X_test_scaled)                 #eval on test split
-
-        acc = accuracy_score(y_test, preds)
-        print(f"{name} with Accuracy: {acc * 100:.2f}%")
-    
-    best_model = None
-    best_acc = 0.0
-    best_name = ""
-    best_pred = None
-    accuracies = {}
-
-    print("\n--- Supervised Model Training ---")
-    for name, model in models.items():
-        print(f"\nTraining {name}...")
-        model.fit(X_train_scaled, y_train)
-        preds = model.predict(X_test_scaled)
-        acc = accuracy_score(y_test, preds)
-        print(f"-> {name} Test Accuracy: {acc * 100:.2f}%")
-        accuracies[name] = acc
-
-        if acc > best_acc:
-            best_acc = acc
-            best_model = model
-            best_name = name
-            best_pred = preds
-
-    print(f"\n==========================================")
-    print(f" BEST MODEL: {best_name} ({best_acc * 100:.2f}% Accuracy)")
-    print(f"==========================================\n")
-
-    # Define directories
-    train_model_dir = "train_model"
-    latest_dir = os.path.join(train_model_dir, "latest_weight")
-    best_dir = os.path.join(train_model_dir, "best_weight")
-
-    # Clear and recreate latest directory
-    if os.path.exists(latest_dir):
-        shutil.rmtree(latest_dir)
-    os.makedirs(latest_dir, exist_ok=True)
-    os.makedirs(best_dir, exist_ok=True)
-
-    print("Generating and saving graphs, metrics, and weight files in 'latest_weight'...")
-    save_plots_and_metrics(latest_dir, best_model, scaler, label_encoder, best_name, best_acc, best_pred, y_test, accuracies)
-    print("Artifacts saved successfully!")
-
-    # Check if latest weight is >= best weight
-    best_metrics_path = os.path.join(best_dir, "metrics.json")
-    update_best = False
-    if not os.path.exists(best_metrics_path):
-        update_best = True
-    else:
-        try:
-            with open(best_metrics_path, "r") as f:
-                best_metrics = json.load(f)
-            if best_acc >= best_metrics.get("accuracy", 0.0):
-                update_best = True
-        except Exception as e:
-            print(f"Warning: Could not read best metrics.json: {e}. Overwriting best weight.")
-            update_best = True
-
-    if update_best:
-        print(f"\n---> Current accuracy ({best_acc * 100:.2f}%) is >= best saved accuracy. Updating 'best_weight'...")
-        if os.path.exists(best_dir):
-            shutil.rmtree(best_dir)
-        shutil.copytree(latest_dir, best_dir)
-        print("Updated 'train_model/best_weight/' successfully with all graphs, metrics, and weights!")
-    else:
-        with open(best_metrics_path, "r") as f:
-            best_metrics = json.load(f)
-        print(f"\n---> Current accuracy ({best_acc * 100:.2f}%) did not exceed best saved accuracy ({best_metrics.get('accuracy', 0.0) * 100:.2f}%). 'best_weight' remains unchanged.")
-
+# ==============================================================================
+# 3. Execution Entry Point
+# ==============================================================================
 if __name__ == "__main__":
     train()
-
-
