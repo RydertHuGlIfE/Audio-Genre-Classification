@@ -25,11 +25,9 @@ baseline_svm = SVC(
 
 def train():
     # Prefer richer filtered features if available, else fall back to base features
-    if os.path.exists("filtered_features.csv"):
-        feature_file = "filtered_features.csv"
-    elif os.path.exists("features_small.csv"):
-        feature_file = "features_small.csv"
-    else:
+    feature_file = "features_small.csv"
+
+    if not os.path.exists(feature_file):
         print("Error: No feature file found. Run 'datapreprocess.py' or 'filter_preprocess.py' first.")
         return
 

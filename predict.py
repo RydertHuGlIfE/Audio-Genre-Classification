@@ -53,9 +53,13 @@ if __name__ == "__main__":
         if df.columns[0].startswith('Unnamed') or df.columns[0] == '0':
             drop_cols.append(df.columns[0])
 
-        sample_row = df.drop(columns=drop_cols).iloc[[0]]
-        actual_genre = df[target_col].iloc[0]
+        sample_count = min(5, len(df))
+        sample_indices = df.sample(n=sample_count).index
+        feature_df = df.drop(columns=drop_cols)
 
-        pred = predict(sample_row)
-        print(f"Sample 0 Prediction: Predicted = '{pred}', Actual = '{actual_genre}'")
+        for sample_number, row_index in enumerate(sample_indices, start=1):
+            sample_row = feature_df.loc[[row_index]]
+            actual_genre = df.loc[row_index, target_col]
+            pred = predict(sample_row)
+            print(f"Sample {sample_number} Prediction: Predicted = '{pred}', Actual = '{actual_genre}'")
 
