@@ -39,6 +39,8 @@ fma_metadata/
 *.ogg
 *.m4a
 *.aac
+hybirc_model_svm_sigmoid
+rbf_model
 
 # Extracted tabular dataset files
 features_small.csv
@@ -66,6 +68,7 @@ label_encoder.joblib
 train_model/**/best_model.joblib
 train_model/**/scaler.joblib
 train_model/**/label_encoder.joblib
+sigmoid_model/
 
 # ==============================================================================
 # Credentials, Secrets & Sensitive Information

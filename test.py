@@ -1,3 +1,4 @@
+import argparse
 import os
 
 import joblib
@@ -13,18 +14,22 @@ from tqdm import tqdm
 
 
 FEATURE_FILE = "features_small.csv"
-WEIGHTS_DIR = os.path.join("train_model", "best_weight")
+MODEL_DIRECTORIES = {
+    "sigmoid": os.path.join("sigmoid_model", "best_weight"),
+    "train": os.path.join("train_model", "best_weight"),
+    "root": ".",
+}
 
 
-def load_dataset():
+def load_dataset(weights_dir):
     if not os.path.exists(FEATURE_FILE):
         raise FileNotFoundError(
             f"Feature file not found: {FEATURE_FILE}. Run datapreprocess.py first."
         )
 
-    model_path = os.path.join(WEIGHTS_DIR, "best_model.joblib")
-    scaler_path = os.path.join(WEIGHTS_DIR, "scaler.joblib")
-    encoder_path = os.path.join(WEIGHTS_DIR, "label_encoder.joblib")
+    model_path = os.path.join(weights_dir, "best_model.joblib")
+    scaler_path = os.path.join(weights_dir, "scaler.joblib")
+    encoder_path = os.path.join(weights_dir, "label_encoder.joblib")
     missing_files = [
         path
         for path in (model_path, scaler_path, encoder_path)
@@ -61,7 +66,17 @@ def load_dataset():
 
 
 def main():
-    model, scaler, test_features, test_labels = load_dataset()
+    parser = argparse.ArgumentParser(description="Evaluate a saved genre model.")
+    parser.add_argument(
+        "--model",
+        choices=MODEL_DIRECTORIES,
+        default="sigmoid",
+        help="Model artifacts to evaluate (default: sigmoid).",
+    )
+    args = parser.parse_args()
+
+    weights_dir = MODEL_DIRECTORIES[args.model]
+    model, scaler, test_features, test_labels = load_dataset(weights_dir)
     scaled_features = scaler.transform(test_features)
 
     predictions = []
@@ -75,7 +90,7 @@ def main():
     predictions = pd.Series(predictions).to_numpy()
     wrong = len(test_labels) - correct
 
-    print("Evaluation: train_model/best_weight")
+    print(f"Evaluation: {weights_dir}")
     print(f"Test split samples evaluated: {len(test_labels)}")
     print(f"Correct: {correct}")
     print(f"Wrong: {wrong}")

@@ -119,7 +119,7 @@ def train():
     print(f"==========================================\n")
 
     # Define directories
-    train_model_dir = "train_model"
+    train_model_dir = "sigmoid_model"
     latest_dir = os.path.join(train_model_dir, "latest_weight")
     best_dir = os.path.join(train_model_dir, "best_weight")
 
