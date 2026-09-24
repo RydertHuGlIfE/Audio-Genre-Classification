@@ -38,6 +38,7 @@ fma_metadata/
 *.flac
 *.ogg
 *.m4a
+cnn_data
 *.aac
 hybirc_model_svm_sigmoid
 rbf_model
