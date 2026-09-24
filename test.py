@@ -16,7 +16,7 @@ FEATURE_FILE = "features_small.csv"
 WEIGHTS_DIR = os.path.join("train_model", "best_weight")
 
 
-def load_test_split():
+def load_dataset():
     if not os.path.exists(FEATURE_FILE):
         raise FileNotFoundError(
             f"Feature file not found: {FEATURE_FILE}. Run datapreprocess.py first."
@@ -61,25 +61,22 @@ def load_test_split():
 
 
 def main():
-    model, scaler, test_features, test_labels = load_test_split()
-    sample_count = min(100, len(test_labels))
-    test_features = test_features.iloc[:sample_count]
-    test_labels = test_labels[:sample_count]
+    model, scaler, test_features, test_labels = load_dataset()
     scaled_features = scaler.transform(test_features)
 
     predictions = []
     correct = 0
-    for index in tqdm(range(sample_count), desc="Testing songs", unit="song"):
+    for index in tqdm(range(len(test_labels)), desc="Testing test split", unit="song"):
         prediction = model.predict(scaled_features[index:index + 1])[0]
         predictions.append(prediction)
         if prediction == test_labels[index]:
             correct += 1
 
     predictions = pd.Series(predictions).to_numpy()
-    wrong = sample_count - correct
+    wrong = len(test_labels) - correct
 
     print("Evaluation: train_model/best_weight")
-    print(f"Test samples evaluated: {sample_count}")
+    print(f"Test split samples evaluated: {len(test_labels)}")
     print(f"Correct: {correct}")
     print(f"Wrong: {wrong}")
     print(f"accuracy: {accuracy_score(test_labels, predictions):.4f}")

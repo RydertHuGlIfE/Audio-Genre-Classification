@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 
 baseline_svm = SVC(
-    kernel="rbf",                       
+    kernel="sigmoid",
     C=1.0,                 #regularization baseline basically smth smth penalty
     gamma="scale",          #low gamma - wider influence smoooth boundayr 
     probability=True,       # enables probablity estimates
@@ -63,13 +63,13 @@ def train():
 
 #remove pca 
     # GridSearchCV: Hyperparameter search over C and gamma
-    print("\nRunning GridSearchCV to find best SVM hyperparameters...")
+    print("\nRunning GridSearchCV to find best sigmoid SVM hyperparameters...")
     param_grid = {
         "C": [0.1, 1, 10, 40, 100],
         "gamma": ["scale", "auto", 0.001, 0.01, 0.1]
     }
     grid = GridSearchCV(
-        SVC(kernel="rbf", random_state=42),
+        SVC(kernel="sigmoid", random_state=42),
         param_grid,
         cv=5,
         scoring="accuracy",
@@ -83,8 +83,8 @@ def train():
 
     # Support Vector Machine (SVM) configurations using best params from GridSearchCV
     models = {
-        "SVM (RBF Baseline, C=1.0)": baseline_svm,
-        "SVM (RBF GridSearch Best)": grid.best_estimator_
+        "SVM (Sigmoid Baseline, C=1.0)": baseline_svm,
+        "SVM (Sigmoid GridSearch Best)": grid.best_estimator_
     }
 
     best_model = None
