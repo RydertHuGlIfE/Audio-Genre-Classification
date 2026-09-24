@@ -9,7 +9,7 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 from sklearn.svm import SVC
-from sklearn.decomposition import PCA
+from tqdm import tqdm
 
 
 baseline_svm = SVC(
@@ -24,15 +24,18 @@ baseline_svm = SVC(
 #train pipeline
 
 def train():
+    progress = tqdm(total=7, desc="Training progress", unit="step")
     # Prefer richer filtered features if available, else fall back to base features
     feature_file = "features_small.csv"
 
     if not os.path.exists(feature_file):
         print("Error: No feature file found. Run 'datapreprocess.py' or 'filter_preprocess.py' first.")
+        progress.close()
         return
 
     print(f"Loading extracted features from '{feature_file}'...")
     df = pd.read_csv(feature_file)
+    progress.update(1)
     
     target_col = 'genre' if 'genre' in df.columns else df.columns[-1]
 
@@ -51,17 +54,14 @@ def train():
     X_train, X_test, y_train, y_test = train_test_split(
         X, y_encoded, test_size=0.3, random_state=49, stratify=y_encoded
     )
+    progress.update(1)
 
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
+    X_test_scaled = scaler.transform(X_test) 
+    progress.update(1)
 
-    # PCA Dimensionality Reduction (retains 95% of variance)
-    pca = PCA(n_components=0.95, random_state=42)
-    X_train_pca = pca.fit_transform(X_train_scaled)
-    X_test_pca = pca.transform(X_test_scaled)
-    print(f"PCA: {X_train_scaled.shape[1]} original features -> {X_train_pca.shape[1]} principal components (95% variance)")
-
+#remove pca 
     # GridSearchCV: Hyperparameter search over C and gamma
     print("\nRunning GridSearchCV to find best SVM hyperparameters...")
     param_grid = {
@@ -74,9 +74,10 @@ def train():
         cv=5,
         scoring="accuracy",
         n_jobs=-1,
-        verbose=1
+        verbose=0
     )
-    grid.fit(X_train_pca, y_train)
+    grid.fit(X_train_scaled, y_train)
+    progress.update(1)
     print(f"Best Params: {grid.best_params_}")
     print(f"Best CV Accuracy: {grid.best_score_ * 100:.2f}%")
 
@@ -93,14 +94,15 @@ def train():
     accuracies = {}
 
     print("\n--- Final Model Evaluation ---")
-    for name, model in models.items():
+    for name, model in tqdm(models.items(), total=len(models), desc="Evaluating models", leave=False):
         print(f"\nEvaluating {name}...")
-        # Baseline uses original scaled features; GridSearch best uses PCA-reduced features
-        if name == "SVM (RBF Baseline, C=1.0)":
-            model.fit(X_train_scaled, y_train)
-            preds = model.predict(X_test_scaled)
-        else:
-            preds = model.predict(X_test_pca)
+        
+
+        #forgot to remove pca smh idk what is happeneing 
+        model.fit(X_train_scaled, y_train)
+        preds = model.predict(X_test_scaled) #predict
+
+
         acc = accuracy_score(y_test, preds)
         print(f"-> {name} Test Accuracy: {acc * 100:.2f}%")
         accuracies[name] = acc
@@ -110,6 +112,7 @@ def train():
             best_model = model
             best_name = name
             best_pred = preds
+    progress.update(1)
 
     print(f"\n==========================================")
     print(f" BEST MODEL: {best_name} ({best_acc * 100:.2f}% Accuracy)")
@@ -129,6 +132,7 @@ def train():
     print("Generating and saving graphs, metrics, and weight files in 'latest_weight'...")
     save_plots_and_metrics(latest_dir, best_model, scaler, label_encoder, best_name, best_acc, best_pred, y_test, accuracies)
     print("Artifacts saved successfully!")
+    progress.update(1)
 
     # Check if latest weight is >= best weight
     best_metrics_path = os.path.join(best_dir, "metrics.json")
@@ -155,6 +159,8 @@ def train():
         with open(best_metrics_path, "r") as f:
             best_metrics = json.load(f)
         print(f"\n---> Current accuracy ({best_acc * 100:.2f}%) did not exceed best saved accuracy ({best_metrics.get('accuracy', 0.0) * 100:.2f}%). 'best_weight' remains unchanged.")
+    progress.update(1)
+    progress.close()
 
 
 # ==============================================================================

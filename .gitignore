@@ -24,6 +24,7 @@ venv.bak/
 # Raw audio directories and archive files
 fma-small/
 fma-small.zip
+models_old
 fma_metadata/
 *.zip
 *.tar

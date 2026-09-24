@@ -9,6 +9,7 @@ from sklearn.metrics import (
     recall_score,
 )
 from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 
 
 FEATURE_FILE = "features_small.csv"
@@ -61,10 +62,26 @@ def load_test_split():
 
 def main():
     model, scaler, test_features, test_labels = load_test_split()
-    predictions = model.predict(scaler.transform(test_features))
+    sample_count = min(100, len(test_labels))
+    test_features = test_features.iloc[:sample_count]
+    test_labels = test_labels[:sample_count]
+    scaled_features = scaler.transform(test_features)
+
+    predictions = []
+    correct = 0
+    for index in tqdm(range(sample_count), desc="Testing songs", unit="song"):
+        prediction = model.predict(scaled_features[index:index + 1])[0]
+        predictions.append(prediction)
+        if prediction == test_labels[index]:
+            correct += 1
+
+    predictions = pd.Series(predictions).to_numpy()
+    wrong = sample_count - correct
 
     print("Evaluation: train_model/best_weight")
-    print(f"Test samples: {len(test_labels)}")
+    print(f"Test samples evaluated: {sample_count}")
+    print(f"Correct: {correct}")
+    print(f"Wrong: {wrong}")
     print(f"accuracy: {accuracy_score(test_labels, predictions):.4f}")
     print(
         "precision: "
