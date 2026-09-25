@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
+import math
 from tensorflow.keras import layers
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
@@ -257,10 +258,7 @@ print("\nCreating TensorFlow datasets...")
 
 
 train_dataset = tf.data.Dataset.from_tensor_slices(
-    (
-        X_train,
-        y_train
-    )
+    (X_train, y_train)
 )
 
 train_dataset = train_dataset.shuffle(
@@ -270,9 +268,10 @@ train_dataset = train_dataset.shuffle(
 )
 
 train_dataset = train_dataset.batch(
-    BATCH_SIZE,
-    drop_remainder=False
+    BATCH_SIZE
 )
+
+train_dataset = train_dataset.repeat()
 
 train_dataset = train_dataset.prefetch(
     tf.data.AUTOTUNE
@@ -280,19 +279,34 @@ train_dataset = train_dataset.prefetch(
 
 
 val_dataset = tf.data.Dataset.from_tensor_slices(
-    (
-        X_val,
-        y_val
-    )
+    (X_val, y_val)
 )
 
 val_dataset = val_dataset.batch(
-    BATCH_SIZE,
-    drop_remainder=False
+    BATCH_SIZE
 )
+
+val_dataset = val_dataset.repeat()
 
 val_dataset = val_dataset.prefetch(
     tf.data.AUTOTUNE
+)
+
+
+steps_per_epoch = math.ceil(
+    len(y_train) / BATCH_SIZE
+)
+
+validation_steps = math.ceil(
+    len(y_val) / BATCH_SIZE
+)
+
+print(
+    f"\nSteps per epoch: {steps_per_epoch}"
+)
+
+print(
+    f"Validation steps: {validation_steps}"
 )
 
 
