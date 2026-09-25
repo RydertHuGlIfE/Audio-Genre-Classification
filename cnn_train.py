@@ -10,7 +10,8 @@ from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 
-DATA_DIR = "/content/drive/MyDrive/cnn_data"
+DATA_DIR = "/content/cnn_data"
+
 TRAIN_DIR = os.path.join(DATA_DIR, "train")
 TEST_DIR = os.path.join(DATA_DIR, "test")
 
@@ -84,7 +85,7 @@ print(
 )
 
 
-def get_track_samples(args):
+def get_track_info(args):
     track_id, label, directory = args
 
     path = os.path.join(
@@ -93,7 +94,7 @@ def get_track_samples(args):
     )
 
     if not os.path.exists(path):
-        return []
+        return path, int(label), 0
 
     try:
         data = np.load(
@@ -101,23 +102,17 @@ def get_track_samples(args):
             mmap_mode="r"
         )
 
-        return [
-            (
-                path,
-                i,
-                int(label)
-            )
-            for i in range(data.shape[0])
-        ]
+        return path, int(label), data.shape[0]
 
     except Exception as e:
         print(
             f"\nSkipping {track_id}: {e}"
         )
-        return []
+        return path, int(label), 0
 
 
-def create_samples(tracks, labels, directory, name):
+def get_track_counts(tracks, labels, directory, name):
+
     tasks = [
         (
             track_id,
@@ -130,166 +125,179 @@ def create_samples(tracks, labels, directory, name):
         )
     ]
 
-    samples = []
+    results = []
 
     with ThreadPoolExecutor(
         max_workers=MAX_WORKERS
     ) as executor:
 
-        results = executor.map(
-            get_track_samples,
+        mapped = executor.map(
+            get_track_info,
             tasks
         )
 
         for result in tqdm(
-            results,
+            mapped,
             total=len(tasks),
             desc=name
         ):
-            samples.extend(result)
+            results.append(result)
 
-    return samples
+    return results
 
 
-print("\nPreparing training samples...")
+def load_tracks_to_ram(
+    tracks,
+    labels,
+    directory,
+    name
+):
 
-train_samples = create_samples(
+    print(f"\nCounting {name.lower()} segments...")
+
+    info = get_track_counts(
+        tracks,
+        labels,
+        directory,
+        name
+    )
+
+    total_segments = sum(
+        item[2]
+        for item in info
+    )
+
+    print(
+        f"{name} segments: {total_segments}"
+    )
+
+    X = np.empty(
+        (
+            total_segments,
+            128,
+            130,
+            1
+        ),
+        dtype=np.float32
+    )
+
+    y = np.empty(
+        total_segments,
+        dtype=np.int32
+    )
+
+    position = 0
+
+    print(
+        f"Loading {name.lower()} into RAM..."
+    )
+
+    for path, label, count in tqdm(
+        info,
+        desc=name
+    ):
+
+        if count == 0:
+            continue
+
+        try:
+            data = np.load(path)
+
+            end = position + count
+
+            X[position:end, :, :, 0] = (
+                data + 80.0
+            ) / 80.0
+
+            y[position:end] = label
+
+            position = end
+
+        except Exception as e:
+            print(
+                f"\nSkipping {path}: {e}"
+            )
+
+    X = X[:position]
+    y = y[:position]
+
+    return X, y
+
+
+print("\nPreparing training data...")
+
+X_train, y_train = load_tracks_to_ram(
     train_ids,
     train_y_tracks,
     TRAIN_DIR,
     "Train"
 )
 
-print(
-    f"Train segments: {len(train_samples)}"
-)
 
+print("\nPreparing validation data...")
 
-print("\nPreparing validation samples...")
-
-val_samples = create_samples(
+X_val, y_val = load_tracks_to_ram(
     val_ids,
     val_y_tracks,
     TRAIN_DIR,
     "Validation"
 )
 
+
 print(
-    f"Validation segments: {len(val_samples)}"
-)
-
-
-print("\nPreparing test samples...")
-
-test_samples = create_samples(
-    test_tracks,
-    test_labels,
-    TEST_DIR,
-    "Test"
+    f"\nX_train shape: {X_train.shape}"
 )
 
 print(
-    f"Test segments: {len(test_samples)}"
+    f"X_val shape: {X_val.shape}"
 )
 
 
-class AudioGenerator(keras.utils.Sequence):
-
-    def __init__(
-        self,
-        samples,
-        batch_size=96,
-        shuffle=True,
-        **kwargs
-    ):
-        super().__init__(**kwargs)
-
-        self.samples = samples
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-
-        self.indexes = np.arange(
-            len(samples)
-        )
-
-        self.on_epoch_end()
-
-    def __len__(self):
-        return int(
-            np.ceil(
-                len(self.samples)
-                / self.batch_size
-            )
-        )
-
-    def __getitem__(self, index):
-
-        batch_indexes = self.indexes[
-            index * self.batch_size:
-            (index + 1) * self.batch_size
-        ]
-
-        X = []
-        y = []
-
-        cache = {}
-
-        for sample_index in batch_indexes:
-
-            path, segment_index, label = (
-                self.samples[sample_index]
-            )
-
-            if path not in cache:
-                cache[path] = np.load(path)
-
-            segment = cache[path][segment_index]
-
-            X.append(segment)
-            y.append(label)
-
-        X = np.asarray(
-            X,
-            dtype=np.float32
-        )
-
-        X = X[..., np.newaxis]
-
-        y = np.asarray(
-            y,
-            dtype=np.int32
-        )
-
-        # Convert -80..0 dB to 0..1
-        X = (X + 80.0) / 80.0
-
-        return X, y
-
-    def on_epoch_end(self):
-
-        if self.shuffle:
-            np.random.shuffle(
-                self.indexes
-            )
+print("\nCreating TensorFlow datasets...")
 
 
-train_generator = AudioGenerator(
-    train_samples,
-    batch_size=BATCH_SIZE,
-    shuffle=True
+train_dataset = tf.data.Dataset.from_tensor_slices(
+    (
+        X_train,
+        y_train
+    )
 )
 
-val_generator = AudioGenerator(
-    val_samples,
-    batch_size=BATCH_SIZE,
-    shuffle=False
+train_dataset = train_dataset.shuffle(
+    buffer_size=10000,
+    seed=RANDOM_STATE,
+    reshuffle_each_iteration=True
 )
 
-test_generator = AudioGenerator(
-    test_samples,
-    batch_size=BATCH_SIZE,
-    shuffle=False
+train_dataset = train_dataset.batch(
+    BATCH_SIZE,
+    drop_remainder=False
 )
+
+train_dataset = train_dataset.prefetch(
+    tf.data.AUTOTUNE
+)
+
+
+val_dataset = tf.data.Dataset.from_tensor_slices(
+    (
+        X_val,
+        y_val
+    )
+)
+
+val_dataset = val_dataset.batch(
+    BATCH_SIZE,
+    drop_remainder=False
+)
+
+val_dataset = val_dataset.prefetch(
+    tf.data.AUTOTUNE
+)
+
+
+del X_train
+del y_train
 
 
 model = keras.Sequential([
@@ -368,7 +376,7 @@ model.compile(
     ),
     loss="sparse_categorical_crossentropy",
     metrics=["accuracy"],
-    steps_per_execution=10
+    steps_per_execution=20
 )
 
 
@@ -415,10 +423,43 @@ print("\nStarting training...\n")
 
 
 history = model.fit(
-    train_generator,
-    validation_data=val_generator,
+    train_dataset,
+    validation_data=val_dataset,
     epochs=EPOCHS,
     callbacks=callbacks
+)
+
+
+del X_val
+del y_val
+
+tf.keras.backend.clear_session()
+
+
+print("\nLoading test data...\n")
+
+
+X_test, y_test = load_tracks_to_ram(
+    test_tracks,
+    test_labels,
+    TEST_DIR,
+    "Test"
+)
+
+
+test_dataset = tf.data.Dataset.from_tensor_slices(
+    (
+        X_test,
+        y_test
+    )
+)
+
+test_dataset = test_dataset.batch(
+    BATCH_SIZE
+)
+
+test_dataset = test_dataset.prefetch(
+    tf.data.AUTOTUNE
 )
 
 
@@ -426,7 +467,7 @@ print("\nFinal test evaluation...\n")
 
 
 loss, accuracy = model.evaluate(
-    test_generator,
+    test_dataset,
     verbose=1
 )
 
