@@ -19,7 +19,7 @@ TEST_DIR = os.path.join(DATA_DIR, "test")
 
 MODEL_DIR = "/content/drive/MyDrive/cnn_model"
 
-BATCH_SIZE = 128
+BATCH_SIZE = 192
 EPOCHS = 20
 RANDOM_STATE = 49
 MAX_WORKERS = 16
