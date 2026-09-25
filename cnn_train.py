@@ -19,8 +19,8 @@ TEST_DIR = os.path.join(DATA_DIR, "test")
 
 MODEL_DIR = "/content/drive/MyDrive/cnn_model"
 
-BATCH_SIZE = 96
-EPOCHS = 30
+BATCH_SIZE = 128
+EPOCHS = 20
 RANDOM_STATE = 49
 MAX_WORKERS = 16
 
@@ -362,7 +362,7 @@ model = keras.Sequential([
         activation="relu"
     ),
 
-    layers.Dropout(0.4),
+    layers.Dropout(0.5),
 
     layers.Dense(
         len(classes),
@@ -373,7 +373,7 @@ model = keras.Sequential([
 
 model.compile(
     optimizer=keras.optimizers.Adam(
-        learning_rate=0.001
+        learning_rate=0.00045
     ),
     loss="sparse_categorical_crossentropy",
     metrics=["accuracy"]
