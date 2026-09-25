@@ -5,15 +5,19 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 
 
-DATA_DIR = "cnn_data"
+DATA_DIR = "/content/drive/MyDrive/cnn_data"
 
 TRAIN_DIR = os.path.join(DATA_DIR, "train")
 TEST_DIR = os.path.join(DATA_DIR, "test")
 
-BATCH_SIZE = 32
-EPOCHS = 20
+MODEL_DIR = "/content/drive/MyDrive/cnn_model"
+
+BATCH_SIZE = 96
+EPOCHS = 30
 RANDOM_STATE = 49
 
 
@@ -44,59 +48,136 @@ test_labels = np.load(
 )
 
 
-def create_samples(tracks, labels, directory):
+print("Classes:")
+print(classes)
+
+print(
+    f"\nTotal training tracks: {len(train_tracks)}"
+)
+
+print(
+    f"Total test tracks: {len(test_tracks)}"
+)
+
+
+# Split training tracks into train and validation
+
+train_ids, val_ids, train_y_tracks, val_y_tracks = train_test_split(
+    train_tracks,
+    train_labels,
+    test_size=0.20,
+    random_state=RANDOM_STATE,
+    stratify=train_labels
+)
+
+
+print(
+    f"\nTraining tracks: {len(train_ids)}"
+)
+
+print(
+    f"Validation tracks: {len(val_ids)}"
+)
+
+print(
+    f"Test tracks: {len(test_tracks)}"
+)
+
+
+def create_samples(tracks, labels, directory, name):
+
     samples = []
-    for track_id, label in zip(tracks, labels):
+
+    for track_id, label in tqdm(
+        zip(tracks, labels),
+        total=len(tracks),
+        desc=name
+    ):
+
         path = os.path.join(
             directory,
             f"{track_id:06d}.npy"
         )
+
         if not os.path.exists(path):
             continue
-        data = np.load(path)
-        for i in range(len(data)):
-            samples.append(
-                (
-                    path,
-                    i,
-                    int(label)
+
+        try:
+
+            data = np.load(path)
+
+            for i in range(len(data)):
+
+                samples.append(
+                    (
+                        path,
+                        i,
+                        int(label)
+                    )
                 )
+
+        except Exception as e:
+
+            print(
+                f"\nSkipping {track_id}: {e}"
             )
 
     return samples
 
 
-print("Preparing training samples...")
+print("\nPreparing training samples...")
 
 train_samples = create_samples(
-    train_tracks,
-    train_labels,
-    TRAIN_DIR
+    train_ids,
+    train_y_tracks,
+    TRAIN_DIR,
+    "Train"
 )
 
-print(f"Train segments: {len(train_samples)}")
+print(
+    f"Train segments: {len(train_samples)}"
+)
 
-print("Preparing test samples...")
+
+print("\nPreparing validation samples...")
+
+val_samples = create_samples(
+    val_ids,
+    val_y_tracks,
+    TRAIN_DIR,
+    "Validation"
+)
+
+print(
+    f"Validation segments: {len(val_samples)}"
+)
+
+
+print("\nPreparing test samples...")
 
 test_samples = create_samples(
     test_tracks,
     test_labels,
-    TEST_DIR
+    TEST_DIR,
+    "Test"
 )
 
-print(f"Test segments: {len(test_samples)}")
+print(
+    f"Test segments: {len(test_samples)}"
+)
 
 
-class AudioGenerator(
-    keras.utils.Sequence
-):
+class AudioGenerator(keras.utils.Sequence):
 
     def __init__(
         self,
         samples,
-        batch_size=32,
-        shuffle=True
+        batch_size=96,
+        shuffle=True,
+        **kwargs
     ):
+
+        super().__init__(**kwargs)
 
         self.samples = samples
         self.batch_size = batch_size
@@ -121,17 +202,16 @@ class AudioGenerator(
             (index + 1) * self.batch_size
         ]
 
-        batch_samples = [
-            self.samples[i]
-            for i in batch_indexes
-        ]
-
         X = []
         y = []
 
         cache = {}
 
-        for path, segment_index, label in batch_samples:
+        for sample_index in batch_indexes:
+
+            path, segment_index, label = (
+                self.samples[sample_index]
+            )
 
             if path not in cache:
                 cache[path] = np.load(path)
@@ -141,19 +221,18 @@ class AudioGenerator(
             X.append(segment)
             y.append(label)
 
-        X = np.array(
+        X = np.asarray(
             X,
             dtype=np.float32
         )
 
         X = X[..., np.newaxis]
 
-        y = np.array(
+        y = np.asarray(
             y,
             dtype=np.int32
         )
 
-        # Normalize using the dB range
         X = (X + 80.0) / 80.0
 
         return X, y
@@ -166,13 +245,19 @@ class AudioGenerator(
 
 train_generator = AudioGenerator(
     train_samples,
-    BATCH_SIZE,
+    batch_size=BATCH_SIZE,
     shuffle=True
+)
+
+val_generator = AudioGenerator(
+    val_samples,
+    batch_size=BATCH_SIZE,
+    shuffle=False
 )
 
 test_generator = AudioGenerator(
     test_samples,
-    BATCH_SIZE,
+    batch_size=BATCH_SIZE,
     shuffle=False
 )
 
@@ -252,7 +337,8 @@ model.compile(
         learning_rate=0.001
     ),
     loss="sparse_categorical_crossentropy",
-    metrics=["accuracy"]
+    metrics=["accuracy"],
+    steps_per_execution=10
 )
 
 
@@ -260,7 +346,7 @@ model.summary()
 
 
 os.makedirs(
-    "cnn_model",
+    MODEL_DIR,
     exist_ok=True
 )
 
@@ -268,55 +354,84 @@ os.makedirs(
 callbacks = [
 
     keras.callbacks.ModelCheckpoint(
-        "cnn_model/best_cnn.keras",
+        os.path.join(
+            MODEL_DIR,
+            "best_cnn.keras"
+        ),
         monitor="val_accuracy",
         save_best_only=True,
-        mode="max"
+        mode="max",
+        verbose=1
     ),
 
     keras.callbacks.ReduceLROnPlateau(
         monitor="val_loss",
         factor=0.5,
         patience=2,
-        min_lr=1e-6
+        min_lr=1e-6,
+        verbose=1
     ),
 
     keras.callbacks.EarlyStopping(
         monitor="val_loss",
-        patience=4,
-        restore_best_weights=True
+        patience=5,
+        restore_best_weights=True,
+        verbose=1
     )
 ]
 
 
 print("\nStarting training...\n")
 
+
 history = model.fit(
     train_generator,
-    validation_data=test_generator,
+    validation_data=val_generator,
     epochs=EPOCHS,
     callbacks=callbacks
 )
 
 
-print("\nFinal evaluation:")
+print("\nFinal test evaluation...\n")
+
 
 loss, accuracy = model.evaluate(
-    test_generator
+    test_generator,
+    verbose=1
 )
+
 
 print(
-    f"Test Accuracy: {accuracy * 100:.2f}%"
+    f"\nTest Accuracy: {accuracy * 100:.2f}%"
 )
+
 
 model.save(
-    "cnn_model/final_cnn.keras"
+    os.path.join(
+        MODEL_DIR,
+        "final_cnn.keras"
+    )
 )
 
+
 np.save(
-    "cnn_model/history.npy",
+    os.path.join(
+        MODEL_DIR,
+        "history.npy"
+    ),
     history.history,
     allow_pickle=True
 )
 
-print("\nModel saved.")
+
+np.save(
+    os.path.join(
+        MODEL_DIR,
+        "classes.npy"
+    ),
+    classes
+)
+
+
+print("\nModel saved to:")
+print(MODEL_DIR)
