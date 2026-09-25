@@ -432,7 +432,6 @@ history = model.fit(
 del X_val
 del y_val
 
-tf.keras.backend.clear_session()
 
 
 print("\nLoading test data...\n")
