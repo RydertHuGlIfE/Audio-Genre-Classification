@@ -1,5 +1,6 @@
 import os
 import random
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import tensorflow as tf
@@ -10,7 +11,6 @@ from tqdm import tqdm
 
 
 DATA_DIR = "/content/drive/MyDrive/cnn_data"
-
 TRAIN_DIR = os.path.join(DATA_DIR, "train")
 TEST_DIR = os.path.join(DATA_DIR, "test")
 
@@ -19,6 +19,7 @@ MODEL_DIR = "/content/drive/MyDrive/cnn_model"
 BATCH_SIZE = 96
 EPOCHS = 30
 RANDOM_STATE = 49
+MAX_WORKERS = 16
 
 
 random.seed(RANDOM_STATE)
@@ -61,7 +62,6 @@ print(
 
 
 # Split training tracks into train and validation
-
 train_ids, val_ids, train_y_tracks, val_y_tracks = train_test_split(
     train_tracks,
     train_labels,
@@ -84,43 +84,69 @@ print(
 )
 
 
+def get_track_samples(args):
+    track_id, label, directory = args
+
+    path = os.path.join(
+        directory,
+        f"{track_id:06d}.npy"
+    )
+
+    if not os.path.exists(path):
+        return []
+
+    try:
+        data = np.load(
+            path,
+            mmap_mode="r"
+        )
+
+        return [
+            (
+                path,
+                i,
+                int(label)
+            )
+            for i in range(data.shape[0])
+        ]
+
+    except Exception as e:
+        print(
+            f"\nSkipping {track_id}: {e}"
+        )
+        return []
+
+
 def create_samples(tracks, labels, directory, name):
+    tasks = [
+        (
+            track_id,
+            label,
+            directory
+        )
+        for track_id, label in zip(
+            tracks,
+            labels
+        )
+    ]
 
     samples = []
 
-    for track_id, label in tqdm(
-        zip(tracks, labels),
-        total=len(tracks),
-        desc=name
-    ):
+    with ThreadPoolExecutor(
+        max_workers=MAX_WORKERS
+    ) as executor:
 
-        path = os.path.join(
-            directory,
-            f"{track_id:06d}.npy"
+        results = executor.map(
+            get_track_samples,
+            tasks
         )
 
-        if not os.path.exists(path):
-            continue
-
-        try:
-
-            data = np.load(path, mmap_mode="r")
-
-            for i in range(data.shape[0]):
-
-                samples.append(
-                    (
-                        path,
-                        i,
-                        int(label)
-                    )
-                )
-
-        except Exception as e:
-
-            print(
-                f"\nSkipping {track_id}: {e}"
-            )
+        for result in tqdm(
+            results,
+            total=len(tasks),
+            desc=name
+        ):
+            samples.extend(result)
 
     return samples
 
@@ -176,18 +202,19 @@ class AudioGenerator(keras.utils.Sequence):
         shuffle=True,
         **kwargs
     ):
-
         super().__init__(**kwargs)
 
         self.samples = samples
         self.batch_size = batch_size
         self.shuffle = shuffle
-        self.indexes = np.arange(len(samples))
+
+        self.indexes = np.arange(
+            len(samples)
+        )
 
         self.on_epoch_end()
 
     def __len__(self):
-
         return int(
             np.ceil(
                 len(self.samples)
@@ -233,6 +260,7 @@ class AudioGenerator(keras.utils.Sequence):
             dtype=np.int32
         )
 
+        # Convert -80..0 dB to 0..1
         X = (X + 80.0) / 80.0
 
         return X, y
@@ -240,7 +268,9 @@ class AudioGenerator(keras.utils.Sequence):
     def on_epoch_end(self):
 
         if self.shuffle:
-            np.random.shuffle(self.indexes)
+            np.random.shuffle(
+                self.indexes
+            )
 
 
 train_generator = AudioGenerator(
