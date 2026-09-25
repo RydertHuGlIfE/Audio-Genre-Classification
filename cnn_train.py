@@ -104,9 +104,9 @@ def create_samples(tracks, labels, directory, name):
 
         try:
 
-            data = np.load(path)
+            data = np.load(path, mmap_mode="r")
 
-            for i in range(len(data)):
+            for i in range(data.shape[0]):
 
                 samples.append(
                     (
