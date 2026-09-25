@@ -8,6 +8,7 @@ from tensorflow import keras
 
 from tensorflow.keras import layers
 from sklearn.model_selection import train_test_split
+import gc 
 from tqdm import tqdm
 
 
@@ -397,7 +398,7 @@ callbacks = [
         ),
         monitor="val_accuracy",
         save_best_only=True,
-        mode="max",
+        mode="max", 
         verbose=1
     ),
 
@@ -410,11 +411,12 @@ callbacks = [
     ),
 
     keras.callbacks.EarlyStopping(
-        monitor="val_loss",
-        patience=5,
-        restore_best_weights=True,
-        verbose=1
-    )
+    monitor="val_accuracy",
+    patience=5,
+    mode="max",
+    restore_best_weights=True,
+    verbose=1
+)
 ]
 
 
@@ -429,9 +431,11 @@ history = model.fit(
 )
 
 
+del train_dataset
+del val_dataset
 del X_val
 del y_val
-
+gc.collect()
 
 
 print("\nLoading test data...\n")
