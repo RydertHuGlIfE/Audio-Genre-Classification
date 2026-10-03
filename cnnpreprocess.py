@@ -7,9 +7,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
 
-METADATA_DIR = "fma-small/fma_metadata/fma_metadata"
-AUDIO_DIR = "fma-small/fma_small/fma_small"
-
+METADATA_PATH = "/content/drive/MyDrive/fma-small/fma_metadata/fma_metadata/tracks.csv"
+AUDIO_DIR = "/content/fma_small"
 OUTPUT_DIR = "cnn_data"
 
 SAMPLE_RATE = 22050
