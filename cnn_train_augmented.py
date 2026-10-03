@@ -12,16 +12,18 @@ from tensorflow.keras import layers
 # Paths
 # =========================
 
-DATA_DIR = "/content/drive/MyDrive/cnn_augmented_data"
-MODEL_DIR = "/content/drive/MyDrive/cnn_augmented_model"
+DRIVE_DATA_DIR = (
+    "/content/drive/MyDrive/"
+    "cnn_augmented_data"
+)
 
-TRAIN_DIR = os.path.join(DATA_DIR, "train")
-VAL_DIR = os.path.join(DATA_DIR, "val")
-TEST_DIR = os.path.join(DATA_DIR, "test")
+LOCAL_DATA_DIR = (
+    "/content/cnn_augmented_data"
+)
 
-METADATA_DIR = os.path.join(
-    DATA_DIR,
-    "metadata"
+MODEL_DIR = (
+    "/content/drive/MyDrive/"
+    "cnn_augmented_model_v2"
 )
 
 
@@ -29,14 +31,64 @@ METADATA_DIR = os.path.join(
 # Settings
 # =========================
 
-BATCH_SIZE = 192
-EPOCHS = 20
+BATCH_SIZE = 128
+EPOCHS = 60
 RANDOM_STATE = 49
+
+N_MELS = 128
+TIME_FRAMES = 130
+NUM_CLASSES = 8
 
 
 random.seed(RANDOM_STATE)
 np.random.seed(RANDOM_STATE)
 tf.random.set_seed(RANDOM_STATE)
+
+
+# =========================
+# Copy processed data locally
+# =========================
+
+if not os.path.exists(
+    os.path.join(
+        LOCAL_DATA_DIR,
+        "metadata"
+    )
+):
+
+    print(
+        "Copying processed dataset "
+        "from Drive to local storage..."
+    )
+
+    os.system(
+        f'rsync -a '
+        f'"{DRIVE_DATA_DIR}/" '
+        f'"{LOCAL_DATA_DIR}/"'
+    )
+
+
+DATA_DIR = LOCAL_DATA_DIR
+
+TRAIN_DIR = os.path.join(
+    DATA_DIR,
+    "train"
+)
+
+VAL_DIR = os.path.join(
+    DATA_DIR,
+    "val"
+)
+
+TEST_DIR = os.path.join(
+    DATA_DIR,
+    "test"
+)
+
+METADATA_DIR = os.path.join(
+    DATA_DIR,
+    "metadata"
+)
 
 
 # =========================
@@ -77,20 +129,23 @@ print("Classes:")
 print(classes)
 
 print(
-    f"\nTraining tracks: {len(train_tracks)}"
+    f"\nTraining tracks: "
+    f"{len(train_tracks)}"
 )
 
 print(
-    f"Validation tracks: {len(val_tracks)}"
+    f"Validation tracks: "
+    f"{len(val_tracks)}"
 )
 
 print(
-    f"Test tracks: {len(test_tracks)}"
+    f"Test tracks: "
+    f"{len(test_tracks)}"
 )
 
 
 # =========================
-# Shard utilities
+# Shards
 # =========================
 
 def get_shards(directory):
@@ -101,32 +156,45 @@ def get_shards(directory):
                 directory,
                 filename
             )
-            for filename in os.listdir(directory)
+            for filename in os.listdir(
+                directory
+            )
             if filename.endswith(".npz")
         ]
     )
 
 
-train_shards = get_shards(TRAIN_DIR)
-val_shards = get_shards(VAL_DIR)
-test_shards = get_shards(TEST_DIR)
+train_shards = get_shards(
+    TRAIN_DIR
+)
+
+val_shards = get_shards(
+    VAL_DIR
+)
+
+test_shards = get_shards(
+    TEST_DIR
+)
 
 
 print(
-    f"\nTrain shards: {len(train_shards)}"
+    f"\nTrain shards: "
+    f"{len(train_shards)}"
 )
 
 print(
-    f"Validation shards: {len(val_shards)}"
+    f"Validation shards: "
+    f"{len(val_shards)}"
 )
 
 print(
-    f"Test shards: {len(test_shards)}"
+    f"Test shards: "
+    f"{len(test_shards)}"
 )
 
 
 # =========================
-# Count segments
+# Segment counts
 # =========================
 
 def count_segments(shards):
@@ -161,20 +229,23 @@ test_segments = count_segments(
 
 
 print(
-    f"\nTrain segments: {train_segments}"
+    f"\nTrain segments: "
+    f"{train_segments}"
 )
 
 print(
-    f"Validation segments: {val_segments}"
+    f"Validation segments: "
+    f"{val_segments}"
 )
 
 print(
-    f"Test segments: {test_segments}"
+    f"Test segments: "
+    f"{test_segments}"
 )
 
 
 # =========================
-# Batch generator
+# Generator
 # =========================
 
 def batch_generator(
@@ -183,112 +254,108 @@ def batch_generator(
     shuffle=False
 ):
 
-    while True:
+    shard_order = np.arange(
+        len(shards)
+    )
 
-        shard_order = np.arange(
-            len(shards)
+    if shuffle:
+
+        np.random.shuffle(
+            shard_order
         )
 
-        if shuffle:
-            np.random.shuffle(
-                shard_order
-            )
+    X_buffer = []
+    y_buffer = []
 
-        X_buffer = []
-        y_buffer = []
+    for shard_index in shard_order:
 
-        for shard_index in shard_order:
+        shard_path = shards[
+            shard_index
+        ]
 
-            shard_path = shards[
-                shard_index
-            ]
+        with np.load(
+            shard_path,
+            allow_pickle=False
+        ) as data:
 
-            with np.load(
-                shard_path,
-                allow_pickle=False
-            ) as data:
+            X = data["X"]
+            y = data["y"]
 
-                X = data["X"]
-                y = data["y"]
+            if shuffle:
 
-                if shuffle:
-
-                    order = np.random.permutation(
-                        len(y)
-                    )
-
-                    X = X[order]
-                    y = y[order]
-
-                for i in range(
+                order = np.random.permutation(
                     len(y)
-                ):
+                )
 
-                    X_buffer.append(
-                        X[i]
+                X = X[order]
+                y = y[order]
+
+            for i in range(
+                len(y)
+            ):
+
+                X_buffer.append(
+                    X[i]
+                )
+
+                y_buffer.append(
+                    y[i]
+                )
+
+                if len(
+                    y_buffer
+                ) == batch_size:
+
+                    batch_X = np.asarray(
+                        X_buffer,
+                        dtype=np.float32
                     )
 
-                    y_buffer.append(
-                        y[i]
+                    batch_y = np.asarray(
+                        y_buffer,
+                        dtype=np.int32
                     )
 
-                    if len(
-                        y_buffer
-                    ) >= batch_size:
+                    batch_X = (
+                        batch_X + 80.0
+                    ) / 80.0
 
-                        batch_X = np.asarray(
-                            X_buffer,
-                            dtype=np.float32
-                        )
+                    batch_X = (
+                        batch_X[..., np.newaxis]
+                    )
 
-                        batch_y = np.asarray(
-                            y_buffer,
-                            dtype=np.int32
-                        )
+                    yield (
+                        batch_X,
+                        batch_y
+                    )
 
-                        batch_X = (
-                            batch_X + 80.0
-                        ) / 80.0
+                    X_buffer.clear()
+                    y_buffer.clear()
 
-                        batch_X = batch_X[
-                            ..., np.newaxis
-                        ]
+    if y_buffer:
 
-                        yield (
-                            batch_X,
-                            batch_y
-                        )
+        batch_X = np.asarray(
+            X_buffer,
+            dtype=np.float32
+        )
 
-                        X_buffer.clear()
-                        y_buffer.clear()
+        batch_y = np.asarray(
+            y_buffer,
+            dtype=np.int32
+        )
 
-        if y_buffer:
+        batch_X = (
+            batch_X + 80.0
+        ) / 80.0
 
-            batch_X = np.asarray(
-                X_buffer,
-                dtype=np.float32
-            )
+        batch_X = (
+            batch_X[..., np.newaxis]
+        )
 
-            batch_y = np.asarray(
-                y_buffer,
-                dtype=np.int32
-            )
-
-            batch_X = (
-                batch_X + 80.0
-            ) / 80.0
-
-            batch_X = batch_X[
-                ..., np.newaxis
-            ]
-
-            yield (
-                batch_X,
-                batch_y
-            )
-
-        if not shuffle:
-            break
+        yield (
+            batch_X,
+            batch_y
+        )
 
 
 # =========================
@@ -296,15 +363,17 @@ def batch_generator(
 # =========================
 
 output_signature = (
+
     tf.TensorSpec(
         shape=(
             None,
-            128,
-            130,
+            N_MELS,
+            TIME_FRAMES,
             1
         ),
         dtype=tf.float32
     ),
+
     tf.TensorSpec(
         shape=(None,),
         dtype=tf.int32
@@ -312,157 +381,394 @@ output_signature = (
 )
 
 
-train_dataset = tf.data.Dataset.from_generator(
-    lambda: batch_generator(
-        train_shards,
-        BATCH_SIZE,
-        shuffle=True
-    ),
-    output_signature=output_signature
+def make_dataset(
+    shards,
+    batch_size,
+    shuffle=False
+):
+
+    dataset = tf.data.Dataset.from_generator(
+
+        lambda: batch_generator(
+            shards,
+            batch_size,
+            shuffle
+        ),
+
+        output_signature=output_signature
+    )
+
+    return dataset.prefetch(
+        tf.data.AUTOTUNE
+    )
+
+
+train_dataset = make_dataset(
+    train_shards,
+    BATCH_SIZE,
+    shuffle=True
 )
 
-val_dataset = tf.data.Dataset.from_generator(
-    lambda: batch_generator(
-        val_shards,
-        BATCH_SIZE,
-        shuffle=False
-    ),
-    output_signature=output_signature
+val_dataset = make_dataset(
+    val_shards,
+    BATCH_SIZE,
+    shuffle=False
 )
 
-test_dataset = tf.data.Dataset.from_generator(
-    lambda: batch_generator(
-        test_shards,
-        BATCH_SIZE,
-        shuffle=False
-    ),
-    output_signature=output_signature
-)
-
-
-train_dataset = train_dataset.prefetch(
-    tf.data.AUTOTUNE
-)
-
-val_dataset = val_dataset.prefetch(
-    tf.data.AUTOTUNE
-)
-
-test_dataset = test_dataset.prefetch(
-    tf.data.AUTOTUNE
+test_dataset = make_dataset(
+    test_shards,
+    BATCH_SIZE,
+    shuffle=False
 )
 
 
 train_steps = int(
     np.ceil(
-        train_segments / BATCH_SIZE
+        train_segments /
+        BATCH_SIZE
     )
 )
 
 val_steps = int(
     np.ceil(
-        val_segments / BATCH_SIZE
+        val_segments /
+        BATCH_SIZE
     )
 )
 
 test_steps = int(
     np.ceil(
-        test_segments / BATCH_SIZE
+        test_segments /
+        BATCH_SIZE
     )
 )
 
 
 print(
-    f"\nTraining steps: {train_steps}"
+    f"\nTraining steps: "
+    f"{train_steps}"
 )
 
 print(
-    f"Validation steps: {val_steps}"
+    f"Validation steps: "
+    f"{val_steps}"
 )
 
 print(
-    f"Test steps: {test_steps}"
+    f"Test steps: "
+    f"{test_steps}"
 )
 
 
 # =========================
-# CNN model
+# SpecAugment
 # =========================
 
-model = keras.Sequential([
+class SpecAugment(
+    layers.Layer
+):
 
-    layers.Input(
-        shape=(128, 130, 1)
-    ),
+    def __init__(
+        self,
+        freq_mask=12,
+        time_mask=12,
+        **kwargs
+    ):
 
-    layers.Conv2D(
-        32,
-        (3, 3),
+        super().__init__(
+            **kwargs
+        )
+
+        self.freq_mask = freq_mask
+        self.time_mask = time_mask
+
+    def call(
+        self,
+        inputs,
+        training=False
+    ):
+
+        if not training:
+
+            return inputs
+
+        shape = tf.shape(
+            inputs
+        )
+
+        batch = shape[0]
+        freq = shape[1]
+        time = shape[2]
+
+        # Frequency masking
+
+        f = tf.random.uniform(
+            [],
+            minval=0,
+            maxval=self.freq_mask + 1,
+            dtype=tf.int32
+        )
+
+        f0 = tf.random.uniform(
+            [],
+            minval=0,
+            maxval=tf.maximum(
+                1,
+                freq - f + 1
+            ),
+            dtype=tf.int32
+        )
+
+        freq_mask = (
+            tf.range(freq)[None, :, None]
+            >= f0
+        ) & (
+            tf.range(freq)[None, :, None]
+            < f0 + f
+        )
+
+        freq_mask = tf.cast(
+            freq_mask,
+            inputs.dtype
+        )
+
+        freq_mask = tf.broadcast_to(
+            freq_mask,
+            [batch, freq, time]
+        )
+
+        freq_mask = (
+            1.0 - freq_mask
+        )
+
+        # Time masking
+
+        t = tf.random.uniform(
+            [],
+            minval=0,
+            maxval=self.time_mask + 1,
+            dtype=tf.int32
+        )
+
+        t0 = tf.random.uniform(
+            [],
+            minval=0,
+            maxval=tf.maximum(
+                1,
+                time - t + 1
+            ),
+            dtype=tf.int32
+        )
+
+        time_mask = (
+            tf.range(time)[None, None, :]
+            >= t0
+        ) & (
+            tf.range(time)[None, None, :]
+            < t0 + t
+        )
+
+        time_mask = tf.cast(
+            time_mask,
+            inputs.dtype
+        )
+
+        time_mask = tf.broadcast_to(
+            time_mask,
+            [batch, freq, time]
+        )
+
+        time_mask = (
+            1.0 - time_mask
+        )
+
+        mask = (
+            freq_mask *
+            time_mask
+        )
+
+        mask = mask[..., None]
+
+        return inputs * mask
+
+
+# =========================
+# Residual block
+# =========================
+
+def residual_block(
+    x,
+    filters,
+    stride=1
+):
+
+    shortcut = x
+
+    x = layers.Conv2D(
+        filters,
+        3,
+        strides=stride,
         padding="same",
-        activation="relu"
-    ),
+        use_bias=False
+    )(x)
 
-    layers.BatchNormalization(),
+    x = layers.BatchNormalization()(x)
 
-    layers.MaxPooling2D(
-        (2, 2)
-    ),
+    x = layers.ReLU()(x)
 
-    layers.Conv2D(
-        64,
-        (3, 3),
+    x = layers.Conv2D(
+        filters,
+        3,
         padding="same",
-        activation="relu"
-    ),
+        use_bias=False
+    )(x)
 
-    layers.BatchNormalization(),
+    x = layers.BatchNormalization()(x)
 
-    layers.MaxPooling2D(
-        (2, 2)
-    ),
+    if (
+        stride != 1
+        or shortcut.shape[-1] != filters
+    ):
 
-    layers.Conv2D(
-        128,
-        (3, 3),
-        padding="same",
-        activation="relu"
-    ),
+        shortcut = layers.Conv2D(
+            filters,
+            1,
+            strides=stride,
+            padding="same",
+            use_bias=False
+        )(shortcut)
 
-    layers.BatchNormalization(),
+        shortcut = layers.BatchNormalization()(
+            shortcut
+        )
 
-    layers.MaxPooling2D(
-        (2, 2)
-    ),
+    x = layers.Add()([
+        x,
+        shortcut
+    ])
 
-    layers.Conv2D(
-        256,
-        (3, 3),
-        padding="same",
-        activation="relu"
-    ),
+    x = layers.ReLU()(x)
 
-    layers.BatchNormalization(),
+    return x
 
-    layers.GlobalAveragePooling2D(),
 
-    layers.Dense(
-        128,
-        activation="relu"
-    ),
+# =========================
+# Model
+# =========================
 
-    layers.Dropout(0.5),
-
-    layers.Dense(
-        len(classes),
-        activation="softmax"
+inputs = keras.Input(
+    shape=(
+        N_MELS,
+        TIME_FRAMES,
+        1
     )
-])
+)
+
+
+x = SpecAugment(
+    freq_mask=12,
+    time_mask=12
+)(inputs)
+
+
+x = layers.Conv2D(
+    32,
+    3,
+    padding="same",
+    use_bias=False
+)(x)
+
+x = layers.BatchNormalization()(x)
+
+x = layers.ReLU()(x)
+
+
+x = residual_block(
+    x,
+    32
+)
+
+x = residual_block(
+    x,
+    64,
+    stride=2
+)
+
+x = residual_block(
+    x,
+    64
+)
+
+x = residual_block(
+    x,
+    128,
+    stride=2
+)
+
+x = residual_block(
+    x,
+    128
+)
+
+x = residual_block(
+    x,
+    256,
+    stride=2
+)
+
+x = residual_block(
+    x,
+    256
+)
+
+
+x = layers.GlobalAveragePooling2D()(x)
+
+
+x = layers.Dense(
+    256,
+    activation="relu"
+)(x)
+
+x = layers.BatchNormalization()(x)
+
+x = layers.Dropout(
+    0.45
+)(x)
+
+
+outputs = layers.Dense(
+    len(classes),
+    activation="softmax"
+)(x)
+
+
+model = keras.Model(
+    inputs,
+    outputs
+)
+
+
+# =========================
+# Learning rate
+# =========================
+
+initial_lr = 3e-4
+
+lr_schedule = keras.optimizers.schedules.CosineDecay(
+    initial_learning_rate=initial_lr,
+    decay_steps=EPOCHS * train_steps,
+    alpha=0.05
+)
+
+
+optimizer = keras.optimizers.Adam(
+    learning_rate=lr_schedule
+)
 
 
 model.compile(
-    optimizer=keras.optimizers.Adam(
-        learning_rate=0.00045
-    ),
+    optimizer=optimizer,
     loss="sparse_categorical_crossentropy",
     metrics=["accuracy"]
 )
@@ -486,7 +792,7 @@ callbacks = [
     keras.callbacks.ModelCheckpoint(
         os.path.join(
             MODEL_DIR,
-            "best_cnn_augmented.keras"
+            "best_cnn_augmented_v2.keras"
         ),
         monitor="val_accuracy",
         save_best_only=True,
@@ -494,17 +800,9 @@ callbacks = [
         verbose=1
     ),
 
-    keras.callbacks.ReduceLROnPlateau(
-        monitor="val_loss",
-        factor=0.5,
-        patience=2,
-        min_lr=1e-6,
-        verbose=1
-    ),
-
     keras.callbacks.EarlyStopping(
         monitor="val_accuracy",
-        patience=5,
+        patience=8,
         mode="max",
         restore_best_weights=True,
         verbose=1
@@ -517,16 +815,23 @@ callbacks = [
 # =========================
 
 print(
-    "\nStarting augmented CNN training...\n"
+    "\nStarting V2 augmented "
+    "ResNet CNN training...\n"
 )
 
 
 history = model.fit(
+
     train_dataset,
+
     validation_data=val_dataset,
+
     steps_per_epoch=train_steps,
+
     validation_steps=val_steps,
+
     epochs=EPOCHS,
+
     callbacks=callbacks
 )
 
@@ -541,14 +846,17 @@ print(
 
 
 loss, accuracy = model.evaluate(
+
     test_dataset,
+
     steps=test_steps,
+
     verbose=1
 )
 
 
 print(
-    f"\nAugmented CNN Test Accuracy: "
+    f"\nV2 Test Accuracy: "
     f"{accuracy * 100:.2f}%"
 )
 
@@ -560,7 +868,7 @@ print(
 model.save(
     os.path.join(
         MODEL_DIR,
-        "final_cnn_augmented.keras"
+        "final_cnn_augmented_v2.keras"
     )
 )
 
