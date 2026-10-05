@@ -398,7 +398,7 @@ def make_dataset(
         output_signature=output_signature
     )
 
-    return dataset.prefetch(
+    return dataset.repeat().prefetch(
         tf.data.AUTOTUNE
     )
 
