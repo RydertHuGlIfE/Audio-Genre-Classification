@@ -666,8 +666,8 @@ inputs = keras.Input(
 
 
 x = SpecAugment(
-    freq_mask=12,
-    time_mask=12
+    freq_mask=6,
+    time_mask=8
 )(inputs)
 
 
@@ -733,7 +733,7 @@ x = layers.Dense(
 x = layers.BatchNormalization()(x)
 
 x = layers.Dropout(
-    0.45
+    0.25
 )(x)
 
 
@@ -802,7 +802,7 @@ callbacks = [
 
     keras.callbacks.EarlyStopping(
         monitor="val_accuracy",
-        patience=8,
+        patience=12,
         mode="max",
         restore_best_weights=True,
         verbose=1
