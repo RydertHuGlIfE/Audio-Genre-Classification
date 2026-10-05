@@ -523,8 +523,8 @@ class SpecAugment(
 
     def __init__(
         self,
-        freq_mask=12,
-        time_mask=12,
+        freq_mask=16,
+        time_mask=16,
         **kwargs
     ):
 
@@ -719,8 +719,8 @@ inputs = keras.Input(
 
 
 x = SpecAugment(
-    freq_mask=6,
-    time_mask=8
+    freq_mask=16,
+    time_mask=16
 )(inputs)
 
 
@@ -786,7 +786,7 @@ x = layers.Dense(
 x = layers.BatchNormalization()(x)
 
 x = layers.Dropout(
-    0.25
+    0.40
 )(x)
 
 
@@ -815,8 +815,9 @@ lr_schedule = keras.optimizers.schedules.CosineDecay(
 )
 
 
-optimizer = keras.optimizers.Adam(
-    learning_rate=lr_schedule
+optimizer = keras.optimizers.AdamW(
+    learning_rate=lr_schedule,
+    weight_decay=1e-4
 )
 
 
