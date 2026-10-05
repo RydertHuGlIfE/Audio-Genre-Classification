@@ -384,7 +384,8 @@ output_signature = (
 def make_dataset(
     shards,
     batch_size,
-    shuffle=False
+    shuffle=False,
+    repeat=False
 ):
 
     dataset = tf.data.Dataset.from_generator(
@@ -398,7 +399,10 @@ def make_dataset(
         output_signature=output_signature
     )
 
-    return dataset.repeat().prefetch(
+    if repeat:
+        dataset = dataset.repeat()
+
+    return dataset.prefetch(
         tf.data.AUTOTUNE
     )
 
@@ -406,13 +410,15 @@ def make_dataset(
 train_dataset = make_dataset(
     train_shards,
     BATCH_SIZE,
-    shuffle=True
+    shuffle=True,
+    repeat=True
 )
 
 val_dataset = make_dataset(
     val_shards,
     BATCH_SIZE,
-    shuffle=False
+    shuffle=False,
+    repeat=False
 )
 
 test_dataset = make_dataset(
@@ -827,8 +833,6 @@ history = model.fit(
     validation_data=val_dataset,
 
     steps_per_epoch=train_steps,
-
-    validation_steps=val_steps,
 
     epochs=EPOCHS,
 
