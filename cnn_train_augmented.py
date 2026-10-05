@@ -407,6 +407,64 @@ def make_dataset(
     )
 
 
+def load_shards_to_ram(
+    shards,
+    name="Validation"
+):
+    print(
+        f"\nLoading {name} shards into RAM "
+        f"({len(shards)} shards)..."
+    )
+
+    X_list = []
+    y_list = []
+    track_ids_list = []
+
+    for shard in shards:
+        with np.load(
+            shard,
+            allow_pickle=False
+        ) as data:
+            X_list.append(data["X"])
+            y_list.append(data["y"])
+            if "track_ids" in data:
+                track_ids_list.append(
+                    data["track_ids"]
+                )
+
+    X = np.concatenate(
+        X_list,
+        axis=0
+    ).astype(np.float32)
+
+    y = np.concatenate(
+        y_list,
+        axis=0
+    ).astype(np.int32)
+
+    # Normalize to [0, 1]
+    X = (X + 80.0) / 80.0
+    X = X[..., np.newaxis]
+
+    track_ids = (
+        np.concatenate(
+            track_ids_list,
+            axis=0
+        )
+        if track_ids_list
+        else None
+    )
+
+    print(
+        f"{name} loaded: "
+        f"X={X.shape} ({X.nbytes / (1024**2):.1f} MB), "
+        f"y={y.shape}"
+    )
+
+    return X, y, track_ids
+
+
+# Train continues to stream from generator to conserve RAM
 train_dataset = make_dataset(
     train_shards,
     BATCH_SIZE,
@@ -414,19 +472,20 @@ train_dataset = make_dataset(
     repeat=True
 )
 
-val_dataset = make_dataset(
+# Load validation directly into RAM (fixed size, ~670MB)
+# This eliminates generator cancellation and guarantees accurate val metrics
+X_val, y_val, _ = load_shards_to_ram(
     val_shards,
-    BATCH_SIZE,
-    shuffle=False,
-    repeat=False
+    name="Validation"
 )
 
-test_dataset = make_dataset(
-    test_shards,
-    BATCH_SIZE,
-    shuffle=False
+val_dataset = tf.data.Dataset.from_tensor_slices(
+    (X_val, y_val)
+).batch(
+    BATCH_SIZE
+).prefetch(
+    tf.data.AUTOTUNE
 )
-
 
 train_steps = int(
     np.ceil(
@@ -437,14 +496,7 @@ train_steps = int(
 
 val_steps = int(
     np.ceil(
-        val_segments /
-        BATCH_SIZE
-    )
-)
-
-test_steps = int(
-    np.ceil(
-        test_segments /
+        len(y_val) /
         BATCH_SIZE
     )
 )
@@ -458,11 +510,6 @@ print(
 print(
     f"Validation steps: "
     f"{val_steps}"
-)
-
-print(
-    f"Test steps: "
-    f"{test_steps}"
 )
 
 
@@ -808,7 +855,7 @@ callbacks = [
 
     keras.callbacks.EarlyStopping(
         monitor="val_accuracy",
-        patience=12,
+        patience=15,
         mode="max",
         restore_best_weights=True,
         verbose=1
@@ -827,15 +874,10 @@ print(
 
 
 history = model.fit(
-
     train_dataset,
-
     validation_data=val_dataset,
-
     steps_per_epoch=train_steps,
-
     epochs=EPOCHS,
-
     callbacks=callbacks
 )
 
@@ -845,24 +887,78 @@ history = model.fit(
 # =========================
 
 print(
-    "\nFinal test evaluation...\n"
+    "\nLoading test data for evaluation...\n"
 )
 
+X_test, y_test, test_track_ids = load_shards_to_ram(
+    test_shards,
+    name="Test"
+)
 
-loss, accuracy = model.evaluate(
+test_dataset = tf.data.Dataset.from_tensor_slices(
+    (X_test, y_test)
+).batch(
+    BATCH_SIZE
+).prefetch(
+    tf.data.AUTOTUNE
+)
 
+print(
+    "\nEvaluating segment-level test accuracy...\n"
+)
+
+loss, segment_accuracy = model.evaluate(
     test_dataset,
-
-    steps=test_steps,
-
     verbose=1
 )
 
-
 print(
-    f"\nV2 Test Accuracy: "
-    f"{accuracy * 100:.2f}%"
+    f"\nV2 Segment-Level Test Accuracy: "
+    f"{segment_accuracy * 100:.2f}%\n"
 )
+
+# Track-level evaluation (Softmax Probability Averaging per track)
+if test_track_ids is not None:
+    print(
+        "Computing Track-Level (Song-Level) "
+        "Accuracy via Softmax Averaging..."
+    )
+
+    test_preds = model.predict(
+        test_dataset,
+        verbose=1
+    )
+
+    unique_tracks = np.unique(test_track_ids)
+    track_correct = 0
+
+    for tid in unique_tracks:
+        idx = np.where(test_track_ids == tid)[0]
+        avg_prob = np.mean(test_preds[idx], axis=0)
+        track_pred = np.argmax(avg_prob)
+        track_true = y_test[idx[0]]
+        if track_pred == track_true:
+            track_correct += 1
+
+    track_accuracy = (
+        track_correct / len(unique_tracks)
+    ) * 100.0
+
+    print(
+        "\n" + "=" * 50
+    )
+    print(
+        f"Segment-Level Test Accuracy: "
+        f"{segment_accuracy * 100:.2f}%"
+    )
+    print(
+        f"Track-Level Test Accuracy:   "
+        f"{track_accuracy:.2f}% "
+        f"({track_correct}/{len(unique_tracks)} tracks)"
+    )
+    print(
+        "=" * 50 + "\n"
+    )
 
 
 # =========================
@@ -908,5 +1004,9 @@ print(
 del train_dataset
 del val_dataset
 del test_dataset
+del X_val
+del y_val
+del X_test
+del y_test
 
 gc.collect()
