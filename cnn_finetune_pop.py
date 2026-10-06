@@ -120,6 +120,43 @@ def load_split_metadata(data_dir):
     return classes, split_sets, track_labels
 
 
+def verify_model_split(data_dir, model_split_dir, classes, split_sets, track_labels):
+    reference_dir = Path(model_split_dir).expanduser()
+    if (reference_dir / "metadata").is_dir():
+        reference_dir = reference_dir / "metadata"
+
+    reference_classes = np.load(reference_dir / "classes.npy", allow_pickle=False)
+    if classes.tolist() != reference_classes.tolist():
+        raise ValueError("Augmented class order differs from the model-run class mapping.")
+
+    for split in ("train", "val", "test"):
+        reference_tracks = np.load(
+            reference_dir / f"{split}_tracks.npy", allow_pickle=False
+        )
+        if set(map(int, reference_tracks.tolist())) != split_sets[split]:
+            raise ValueError(
+                f"Augmented {split} track IDs do not match the model-run split."
+            )
+
+        reference_labels_path = reference_dir / f"{split}_labels.npy"
+        if reference_labels_path.is_file():
+            reference_labels = np.load(reference_labels_path, allow_pickle=False)
+            if len(reference_tracks) != len(reference_labels):
+                raise ValueError(f"Model-run {split} track and label lengths differ.")
+            expected = dict(zip(map(int, reference_tracks), map(int, reference_labels)))
+            current = track_labels.get(split)
+            if current is None:
+                current_tracks = np.load(
+                    data_dir / "metadata" / f"{split}_tracks.npy", allow_pickle=False
+                )
+                current_labels = np.load(
+                    data_dir / "metadata" / f"{split}_labels.npy", allow_pickle=False
+                )
+                current = dict(zip(map(int, current_tracks), map(int, current_labels)))
+            if expected != current:
+                raise ValueError(f"Augmented {split} labels do not match the model-run labels.")
+
+
 def shard_paths(data_dir, split):
     split_dir = data_dir / split
     if not split_dir.is_dir():
@@ -307,6 +344,11 @@ def parse_args():
         description="Fine-tune model.keras to improve Pop using augmented train shards."
     )
     parser.add_argument("--data-dir", help="Augmented dataset root; defaults to detected project paths.")
+    parser.add_argument(
+        "--model-split-dir",
+        required=True,
+        help="Metadata directory (or its parent dataset directory) for the model's original split.",
+    )
     parser.add_argument("--model", default=str(MODEL_PATH), help="Starting Keras model.")
     parser.add_argument(
         "--output",
@@ -330,6 +372,13 @@ def main():
 
     data_dir = resolve_data_dir(args.data_dir)
     classes, split_sets, track_labels = load_split_metadata(data_dir)
+    verify_model_split(
+        data_dir,
+        args.model_split_dir,
+        classes,
+        split_sets,
+        track_labels,
+    )
     pop_label = classes.tolist().index("Pop")
     train_shards = shard_paths(data_dir, "train")
     val_shards = shard_paths(data_dir, "val")
