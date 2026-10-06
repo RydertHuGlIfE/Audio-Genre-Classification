@@ -44,6 +44,8 @@ SHARD_SIZE = 256
 
 MAX_AUDIO_SECONDS = 30
 
+NUM_TRAIN_COPIES = 4
+
 TARGET_GENRES = [
     "Electronic",
     "Experimental",
@@ -60,8 +62,6 @@ TARGET_GENRES = [
 # Augmentation settings
 # =========================
 
-AUGMENT_PROBABILITY = 0.80
-
 TIME_SHIFT_SECONDS = 0.5
 
 TIME_STRETCH_MIN = 0.90
@@ -69,9 +69,6 @@ TIME_STRETCH_MAX = 1.10
 
 PITCH_SHIFT_MIN = -2
 PITCH_SHIFT_MAX = 2
-
-GAIN_MIN_DB = -20
-GAIN_MAX_DB = 20
 
 
 random.seed(RANDOM_STATE)
@@ -191,22 +188,7 @@ def pitch_shift(y, sr):
     )
 
 
-def gain(y):
-
-    gain_db = random.uniform(
-        GAIN_MIN_DB,
-        GAIN_MAX_DB
-    )
-
-    factor = 10 ** (gain_db / 20.0)
-
-    return y * factor
-
-
 def augment_audio(y, sr):
-
-    if random.random() > AUGMENT_PROBABILITY:
-        return y
 
     operations = []
 
@@ -219,17 +201,13 @@ def augment_audio(y, sr):
     if random.random() < 0.50:
         operations.append("pitch")
 
-    if random.random() < 0.50:
-        operations.append("gain")
-
     if not operations:
 
         operations.append(
             random.choice([
                 "shift",
                 "stretch",
-                "pitch",
-                "gain"
+                "pitch"
             ])
         )
 
@@ -244,9 +222,6 @@ def augment_audio(y, sr):
         elif operation == "pitch":
             y = pitch_shift(y, sr)
 
-        elif operation == "gain":
-            y = gain(y)
-
     return np.clip(y, -1.0, 1.0)
 
 
@@ -255,16 +230,10 @@ def augment_audio(y, sr):
 # =========================
 
 def audio_to_segments(
-    file_path,
+    y,
+    sr,
     augment=False
 ):
-
-    y, sr = librosa.load(
-        file_path,
-        sr=SAMPLE_RATE,
-        mono=True,
-        duration=MAX_AUDIO_SECONDS
-    )
 
     segment_length = (
         SAMPLE_RATE * SEGMENT_SECONDS
@@ -460,10 +429,12 @@ def process_split(
     encoder
 ):
 
-    augment = split_name == "train"
+    is_train = split_name == "train"
+    num_copies = NUM_TRAIN_COPIES if is_train else 1
 
     print(
-        f"\nProcessing {split_name.upper()}"
+        f"\nProcessing {split_name.upper()} "
+        f"({num_copies} {'augmented ' if is_train else ''}copy/ies per track)"
     )
 
     writer = ShardWriter(
@@ -493,36 +464,52 @@ def process_split(
 
         try:
 
-            segments = audio_to_segments(
+            y, sr = librosa.load(
                 file_path,
-                augment=augment
+                sr=SAMPLE_RATE,
+                mono=True,
+                duration=MAX_AUDIO_SECONDS
             )
-
-            if len(segments) == 0:
-
-                print(
-                    f"\nNo segments: {track_id}"
-                )
-
-                continue
 
             label = encoder.transform(
                 [labels[track_id]]
             )[0]
 
-            writer.add(
-                segments,
-                label,
-                track_id
-            )
+            track_has_segments = False
 
-            valid_tracks.append(
-                track_id
-            )
+            for _ in range(num_copies):
 
-            valid_labels.append(
-                label
-            )
+                segments = audio_to_segments(
+                    y,
+                    sr,
+                    augment=is_train
+                )
+
+                if len(segments) > 0:
+
+                    writer.add(
+                        segments,
+                        label,
+                        track_id
+                    )
+
+                    track_has_segments = True
+
+            if track_has_segments:
+
+                valid_tracks.append(
+                    track_id
+                )
+
+                valid_labels.append(
+                    label
+                )
+
+            else:
+
+                print(
+                    f"\nNo segments: {track_id}"
+                )
 
         except Exception as e:
 

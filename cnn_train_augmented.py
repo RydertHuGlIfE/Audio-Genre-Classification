@@ -32,12 +32,13 @@ MODEL_DIR = (
 # =========================
 
 BATCH_SIZE = 128
-EPOCHS = 60
+EPOCHS = 15
 RANDOM_STATE = 49
 
 N_MELS = 128
 TIME_FRAMES = 130
 NUM_CLASSES = 8
+MIXUP_ALPHA = 0.2
 
 
 random.seed(RANDOM_STATE)
@@ -251,7 +252,8 @@ print(
 def batch_generator(
     shards,
     batch_size,
-    shuffle=False
+    shuffle=False,
+    buffer_shards=16
 ):
 
     shard_order = np.arange(
@@ -264,98 +266,74 @@ def batch_generator(
             shard_order
         )
 
-    X_buffer = []
-    y_buffer = []
+    for chunk_start in range(
+        0,
+        len(shard_order),
+        buffer_shards
+    ):
 
-    for shard_index in shard_order:
-
-        shard_path = shards[
-            shard_index
+        chunk_indices = shard_order[
+            chunk_start:chunk_start + buffer_shards
         ]
 
-        with np.load(
-            shard_path,
-            allow_pickle=False
-        ) as data:
+        X_list = []
+        y_list = []
 
-            X = data["X"]
-            y = data["y"]
+        for idx in chunk_indices:
 
-            if shuffle:
+            with np.load(
+                shards[idx],
+                allow_pickle=False
+            ) as data:
 
-                order = np.random.permutation(
-                    len(y)
-                )
+                X_list.append(data["X"])
+                y_list.append(data["y"])
 
-                X = X[order]
-                y = y[order]
-
-            for i in range(
-                len(y)
-            ):
-
-                X_buffer.append(
-                    X[i]
-                )
-
-                y_buffer.append(
-                    y[i]
-                )
-
-                if len(
-                    y_buffer
-                ) == batch_size:
-
-                    batch_X = np.asarray(
-                        X_buffer,
-                        dtype=np.float32
-                    )
-
-                    batch_y = np.asarray(
-                        y_buffer,
-                        dtype=np.int32
-                    )
-
-                    batch_X = (
-                        batch_X + 80.0
-                    ) / 80.0
-
-                    batch_X = (
-                        batch_X[..., np.newaxis]
-                    )
-
-                    yield (
-                        batch_X,
-                        batch_y
-                    )
-
-                    X_buffer.clear()
-                    y_buffer.clear()
-
-    if y_buffer:
-
-        batch_X = np.asarray(
-            X_buffer,
-            dtype=np.float32
+        X_buf = np.concatenate(
+            X_list,
+            axis=0
         )
 
-        batch_y = np.asarray(
-            y_buffer,
-            dtype=np.int32
+        y_buf = np.concatenate(
+            y_list,
+            axis=0
         )
 
-        batch_X = (
-            batch_X + 80.0
-        ) / 80.0
+        if shuffle:
 
-        batch_X = (
-            batch_X[..., np.newaxis]
-        )
+            perm = np.random.permutation(
+                len(y_buf)
+            )
 
-        yield (
-            batch_X,
-            batch_y
-        )
+            X_buf = X_buf[perm]
+            y_buf = y_buf[perm]
+
+        for i in range(
+            0,
+            len(y_buf),
+            batch_size
+        ):
+
+            batch_X = X_buf[
+                i:i + batch_size
+            ].astype(np.float32)
+
+            batch_y = y_buf[
+                i:i + batch_size
+            ].astype(np.int32)
+
+            batch_X = (
+                batch_X + 80.0
+            ) / 80.0
+
+            batch_X = (
+                batch_X[..., np.newaxis]
+            )
+
+            yield (
+                batch_X,
+                batch_y
+            )
 
 
 # =========================
@@ -402,9 +380,67 @@ def make_dataset(
     if repeat:
         dataset = dataset.repeat()
 
-    return dataset.prefetch(
-        tf.data.AUTOTUNE
+    return dataset
+
+
+def to_one_hot(images, labels):
+
+    labels = tf.one_hot(
+        labels,
+        depth=NUM_CLASSES,
+        dtype=tf.float32
     )
+
+    return images, labels
+
+
+def mixup_batch(images, labels, alpha=MIXUP_ALPHA):
+
+    batch_size = tf.shape(images)[0]
+
+    perm = tf.random.shuffle(
+        tf.range(batch_size)
+    )
+
+    images_shuffled = tf.gather(
+        images,
+        perm
+    )
+
+    labels_shuffled = tf.gather(
+        labels,
+        perm
+    )
+
+    # Sample lambda from Beta(alpha, alpha) via two Gamma distributions
+    gamma1 = tf.random.gamma(
+        shape=[batch_size, 1, 1, 1],
+        alpha=alpha
+    )
+
+    gamma2 = tf.random.gamma(
+        shape=[batch_size, 1, 1, 1],
+        alpha=alpha
+    )
+
+    lam_x = gamma1 / (gamma1 + gamma2)
+
+    lam_y = tf.reshape(
+        lam_x,
+        [batch_size, 1]
+    )
+
+    mixed_images = (
+        lam_x * images +
+        (1.0 - lam_x) * images_shuffled
+    )
+
+    mixed_labels = (
+        lam_y * labels +
+        (1.0 - lam_y) * labels_shuffled
+    )
+
+    return mixed_images, mixed_labels
 
 
 def load_shards_to_ram(
@@ -472,15 +508,35 @@ train_dataset = make_dataset(
     repeat=True
 )
 
+train_dataset = (
+    train_dataset
+    .map(
+        to_one_hot,
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+    .map(
+        lambda x, y: mixup_batch(x, y, alpha=MIXUP_ALPHA),
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+    .prefetch(
+        tf.data.AUTOTUNE
+    )
+)
+
 # Load validation directly into RAM (fixed size, ~670MB)
-# This eliminates generator cancellation and guarantees accurate val metrics
 X_val, y_val, _ = load_shards_to_ram(
     val_shards,
     name="Validation"
 )
 
+y_val_one_hot = tf.one_hot(
+    y_val,
+    depth=NUM_CLASSES,
+    dtype=tf.float32
+)
+
 val_dataset = tf.data.Dataset.from_tensor_slices(
-    (X_val, y_val)
+    (X_val, y_val_one_hot)
 ).batch(
     BATCH_SIZE
 ).prefetch(
@@ -525,6 +581,8 @@ class SpecAugment(
         self,
         freq_mask=16,
         time_mask=16,
+        n_freq_masks=2,
+        n_time_masks=2,
         **kwargs
     ):
 
@@ -534,6 +592,8 @@ class SpecAugment(
 
         self.freq_mask = freq_mask
         self.time_mask = time_mask
+        self.n_freq_masks = n_freq_masks
+        self.n_time_masks = n_time_masks
 
     def call(
         self,
@@ -542,7 +602,6 @@ class SpecAugment(
     ):
 
         if not training:
-
             return inputs
 
         shape = tf.shape(
@@ -553,96 +612,98 @@ class SpecAugment(
         freq = shape[1]
         time = shape[2]
 
-        # Frequency masking
+        x = inputs
 
-        f = tf.random.uniform(
-            [],
-            minval=0,
-            maxval=self.freq_mask + 1,
-            dtype=tf.int32
-        )
+        # Frequency masking: per-sample
+        for _ in range(self.n_freq_masks):
 
-        f0 = tf.random.uniform(
-            [],
-            minval=0,
-            maxval=tf.maximum(
+            f = tf.random.uniform(
+                [batch],
+                minval=0,
+                maxval=self.freq_mask + 1,
+                dtype=tf.int32
+            )
+
+            max_f0 = tf.maximum(
                 1,
                 freq - f + 1
-            ),
-            dtype=tf.int32
-        )
+            )
 
-        freq_mask = (
-            tf.range(freq)[None, :, None]
-            >= f0
-        ) & (
-            tf.range(freq)[None, :, None]
-            < f0 + f
-        )
+            f0 = tf.random.uniform(
+                [batch],
+                minval=0,
+                maxval=tf.int32.max,
+                dtype=tf.int32
+            ) % max_f0
 
-        freq_mask = tf.cast(
-            freq_mask,
-            inputs.dtype
-        )
+            freq_indices = tf.range(freq)[None, :, None]
+            f0_exp = f0[:, None, None]
+            f_exp = f[:, None, None]
 
-        freq_mask = tf.broadcast_to(
-            freq_mask,
-            [batch, freq, time]
-        )
+            mask = (
+                (freq_indices >= f0_exp) &
+                (freq_indices < (f0_exp + f_exp))
+            )
 
-        freq_mask = (
-            1.0 - freq_mask
-        )
+            mask = 1.0 - tf.cast(
+                mask,
+                inputs.dtype
+            )
 
-        # Time masking
+            x = x * mask[..., None]
 
-        t = tf.random.uniform(
-            [],
-            minval=0,
-            maxval=self.time_mask + 1,
-            dtype=tf.int32
-        )
+        # Time masking: per-sample
+        for _ in range(self.n_time_masks):
 
-        t0 = tf.random.uniform(
-            [],
-            minval=0,
-            maxval=tf.maximum(
+            t = tf.random.uniform(
+                [batch],
+                minval=0,
+                maxval=self.time_mask + 1,
+                dtype=tf.int32
+            )
+
+            max_t0 = tf.maximum(
                 1,
                 time - t + 1
-            ),
-            dtype=tf.int32
-        )
+            )
 
-        time_mask = (
-            tf.range(time)[None, None, :]
-            >= t0
-        ) & (
-            tf.range(time)[None, None, :]
-            < t0 + t
-        )
+            t0 = tf.random.uniform(
+                [batch],
+                minval=0,
+                maxval=tf.int32.max,
+                dtype=tf.int32
+            ) % max_t0
 
-        time_mask = tf.cast(
-            time_mask,
-            inputs.dtype
-        )
+            time_indices = tf.range(time)[None, None, :]
+            t0_exp = t0[:, None, None]
+            t_exp = t[:, None, None]
 
-        time_mask = tf.broadcast_to(
-            time_mask,
-            [batch, freq, time]
-        )
+            mask = (
+                (time_indices >= t0_exp) &
+                (time_indices < (t0_exp + t_exp))
+            )
 
-        time_mask = (
-            1.0 - time_mask
-        )
+            mask = 1.0 - tf.cast(
+                mask,
+                inputs.dtype
+            )
 
-        mask = (
-            freq_mask *
-            time_mask
-        )
+            x = x * mask[..., None]
 
-        mask = mask[..., None]
+        return x
 
-        return inputs * mask
+    def get_config(self):
+
+        config = super().get_config()
+
+        config.update({
+            "freq_mask": self.freq_mask,
+            "time_mask": self.time_mask,
+            "n_freq_masks": self.n_freq_masks,
+            "n_time_masks": self.n_time_masks
+        })
+
+        return config
 
 
 # =========================
@@ -720,12 +781,14 @@ inputs = keras.Input(
 
 x = SpecAugment(
     freq_mask=16,
-    time_mask=16
+    time_mask=16,
+    n_freq_masks=2,
+    n_time_masks=2
 )(inputs)
 
 
 x = layers.Conv2D(
-    32,
+    16,
     3,
     padding="same",
     use_bias=False
@@ -735,6 +798,17 @@ x = layers.BatchNormalization()(x)
 
 x = layers.ReLU()(x)
 
+
+x = residual_block(
+    x,
+    16
+)
+
+x = residual_block(
+    x,
+    32,
+    stride=2
+)
 
 x = residual_block(
     x,
@@ -763,30 +837,19 @@ x = residual_block(
     128
 )
 
-x = residual_block(
-    x,
-    256,
-    stride=2
-)
-
-x = residual_block(
-    x,
-    256
-)
-
 
 x = layers.GlobalAveragePooling2D()(x)
 
 
 x = layers.Dense(
-    256,
+    128,
     activation="relu"
 )(x)
 
 x = layers.BatchNormalization()(x)
 
 x = layers.Dropout(
-    0.40
+    0.50
 )(x)
 
 
@@ -803,7 +866,7 @@ model = keras.Model(
 
 
 # =========================
-# Learning rate
+# Learning rate & Optimizer
 # =========================
 
 initial_lr = 3e-4
@@ -817,13 +880,15 @@ lr_schedule = keras.optimizers.schedules.CosineDecay(
 
 optimizer = keras.optimizers.AdamW(
     learning_rate=lr_schedule,
-    weight_decay=1e-4
+    weight_decay=1e-2
 )
 
 
 model.compile(
     optimizer=optimizer,
-    loss="sparse_categorical_crossentropy",
+    loss=keras.losses.CategoricalCrossentropy(
+        label_smoothing=0.1
+    ),
     metrics=["accuracy"]
 )
 
@@ -856,7 +921,7 @@ callbacks = [
 
     keras.callbacks.EarlyStopping(
         monitor="val_accuracy",
-        patience=15,
+        patience=5,
         mode="max",
         restore_best_weights=True,
         verbose=1
@@ -896,8 +961,14 @@ X_test, y_test, test_track_ids = load_shards_to_ram(
     name="Test"
 )
 
+y_test_one_hot = tf.one_hot(
+    y_test,
+    depth=NUM_CLASSES,
+    dtype=tf.float32
+)
+
 test_dataset = tf.data.Dataset.from_tensor_slices(
-    (X_test, y_test)
+    (X_test, y_test_one_hot)
 ).batch(
     BATCH_SIZE
 ).prefetch(
