@@ -62,7 +62,7 @@ if not os.path.exists(
     )
 
     os.system(
-        f'rsync -a '
+        f'rsync -aL '
         f'"{DRIVE_DATA_DIR}/" '
         f'"{LOCAL_DATA_DIR}/"'
     )
